@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=BIZ+UDPGothic:wght@400;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
-/* Layout: 打刻カードが主役。タブで 打刻 / 授業 / 集計 / 設定 を切り替える一列構成。GPS確認の結果は記録ごとのバッジで示す */
+/* Layout: 「今日やること」と打刻カードが主役。タブで 打刻 / 授業 / 罰 / 集計 / 設定。違反は罰ポイントとして台帳に積み上がる */
 :root{
   --bg:#ECEFF3; --surface:#FFFFFF; --sunk:#F4F6F9; --ink:#17202B; --muted:#5A6573; --line:#D2D8E0;
   --accent:#1F4FD1; --accent-ink:#FFFFFF; --accent-soft:#E3EAFB;
@@ -55,15 +55,28 @@ button,input,select{font:inherit;color:inherit}
 .notice{border-radius:var(--r);padding:10px 14px;font-size:.88rem;background:var(--warn-soft)}
 .notice.crit{background:var(--crit-soft)}
 .notice b{color:var(--ink)}
+.penban{background:var(--crit);color:var(--surface);border-radius:var(--r);padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-weight:700}
+.penban .btn{background:var(--surface);color:var(--crit);border-color:var(--surface)}
 
 .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);overflow-x:auto}
-.tab{background:none;border:0;padding:10px 16px;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;margin-bottom:-1px;white-space:nowrap;font-weight:700}
+.tab{background:none;border:0;padding:10px 14px;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;margin-bottom:-1px;white-space:nowrap;font-weight:700;position:relative}
 .tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tab .badge{display:inline-block;min-width:18px;height:18px;border-radius:9px;background:var(--crit);color:var(--surface);font-size:.7rem;line-height:18px;text-align:center;padding:0 5px;margin-left:4px;vertical-align:1px}
 
 .panel{display:flex;flex-direction:column;gap:18px}
 .box{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
 .box-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:18px}
+
+/* 今日やること */
+.todo{display:flex;flex-direction:column;gap:8px}
+.todo .it{display:grid;grid-template-columns:6px 1fr;gap:12px;background:var(--sunk);border-radius:8px;padding:10px 12px 10px 0;overflow:hidden}
+.todo .it::before{content:"";background:var(--line);border-radius:0 3px 3px 0}
+.todo .it.crit::before{background:var(--crit)} .todo .it.warn::before{background:var(--warn)} .todo .it.ok::before{background:var(--ok)} .todo .it.info::before{background:var(--accent)}
+.todo .it .tx{display:flex;flex-direction:column;gap:6px;min-width:0}
+.todo .it .tx b{font-size:.95rem}
+.todo .it .tx span{font-size:.82rem;color:var(--muted)}
+.todo .done{color:var(--muted);font-size:.85rem;display:flex;flex-wrap:wrap;gap:6px 12px}
 
 /* 打刻カード */
 .punch{display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:20px 20px 20px 34px;position:relative}
@@ -101,12 +114,13 @@ button,input,select{font:inherit;color:inherit}
 .field{display:flex;flex-direction:column;gap:4px;min-width:0;flex:1 1 140px}
 .field.narrow{flex:0 1 120px}
 .field label,.field .lab{font-size:.78rem;color:var(--muted);font-weight:700}
-input[type=text],input[type=number],input[type=date],input[type=datetime-local],select{background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-height:40px;width:100%}
+input[type=text],input[type=number],input[type=date],input[type=time],input[type=datetime-local],select{background:var(--sunk);border:1px solid var(--line);border-radius:8px;padding:8px 10px;min-height:40px;width:100%}
 .seg{display:flex;flex-wrap:wrap;gap:6px}
 .seg input{position:absolute;opacity:0;pointer-events:none}
 .seg label{border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer;background:var(--sunk);font-size:.9rem;font-weight:700;color:var(--ink)}
 .seg input:checked+label{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .seg input:focus-visible+label{outline:2px solid var(--accent);outline-offset:2px}
+.check{display:flex;gap:8px;align-items:center;font-size:.9rem}
 
 .list{display:flex;flex-direction:column}
 .row{display:grid;grid-template-columns:86px 1fr auto;gap:4px 12px;padding:10px 0;border-top:1px solid var(--line);align-items:center}
@@ -114,6 +128,8 @@ input[type=text],input[type=number],input[type=date],input[type=datetime-local],
 .row .date{font-family:var(--f-mono);font-variant-numeric:tabular-nums;color:var(--muted);font-size:.85rem}
 .row .main{min-width:0;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
 .row .note{grid-column:2/4;color:var(--muted);font-size:.85rem;overflow-wrap:anywhere}
+.row .pts{font-family:var(--f-mono);font-weight:600;font-variant-numeric:tabular-nums}
+.row .pts.plus{color:var(--crit)} .row .pts.minus{color:var(--ok)}
 .editor{grid-column:1/-1;background:var(--sunk);border-radius:8px;padding:12px;margin-top:6px}
 .empty{color:var(--muted);font-size:.9rem;padding:6px 0}
 
@@ -125,7 +141,7 @@ input[type=text],input[type=number],input[type=date],input[type=datetime-local],
 .bar .fill{height:100%;background:var(--accent)}
 .bar .fill.unv{background:var(--warn)}
 .bar .v{text-align:right;font-family:var(--f-mono);font-variant-numeric:tabular-nums;font-size:.88rem}
-.legend{display:flex;gap:14px;font-size:.8rem;color:var(--muted)}
+.legend{display:flex;gap:14px;font-size:.8rem;color:var(--muted);flex-wrap:wrap}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:12px}
@@ -133,13 +149,26 @@ input[type=text],input[type=number],input[type=date],input[type=datetime-local],
 .stat .k{font-size:.75rem;color:var(--muted);font-weight:700}
 .stat .v{font-family:var(--f-mono);font-size:1.5rem;font-weight:600;font-variant-numeric:tabular-nums}
 
+/* 罰 */
+.penhead{display:grid;grid-template-columns:auto 1fr;gap:6px 20px;align-items:end}
+.penhead .big{font-family:var(--f-mono);font-size:3rem;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.penhead .big.crit{color:var(--crit)} .penhead .big.ok{color:var(--ok)}
+.penhead .meter{grid-column:1/-1}
+.meter{height:10px;background:var(--sunk);border-radius:5px;overflow:hidden;border:1px solid var(--line)}
+.meter i{display:block;height:100%;background:var(--warn)}
+.meter.crit i{background:var(--crit)}
+.menu{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:10px}
+.menu .m{border:1px solid var(--line);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:8px;background:var(--sunk)}
+.menu .m .h{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
+.ptsgrid{display:grid;grid-template-columns:1fr 84px;gap:8px 12px;align-items:center}
+.ptsgrid label{font-size:.88rem}
+
 .subjects{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));gap:12px}
 .subj{border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;flex-direction:column;gap:8px;background:var(--surface);border-top:4px solid var(--ok)}
 .subj.warn{border-top-color:var(--warn)} .subj.crit{border-top-color:var(--crit)}
 .subj .h{display:flex;justify-content:space-between;gap:8px;align-items:baseline}
 .subj .h b{overflow-wrap:anywhere}
-.meter{height:8px;background:var(--sunk);border-radius:4px;overflow:hidden}
-.meter i{display:block;height:100%;background:var(--ok)}
+.subj .meter i{background:var(--ok)}
 .subj.warn .meter i{background:var(--warn)} .subj.crit .meter i{background:var(--crit)}
 .subj .num{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 .subj .num strong{font-size:1.4rem;font-weight:600}
@@ -154,6 +183,10 @@ th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;white
 th{font-size:.75rem;color:var(--muted)}
 td.n,th.n{text-align:right}
 td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
+table.tt{min-width:560px}
+table.tt td{padding:4px}
+table.tt select{min-height:36px;padding:4px 6px;font-size:.82rem}
+table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:88px}
 
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:.9rem;max-width:calc(100% - 32px);z-index:5}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
@@ -164,23 +197,30 @@ td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
   <header class="top">
     <div>
       <h1>授業・ロボコン勤怠</h1>
-      <p class="muted small">GPSで場所を確かめてから記録します</p>
+      <p class="muted small">GPSで場所を確かめて記録し、さぼりは罰ポイントになります</p>
     </div>
     <div class="clock"><div class="t" id="clockT">--:--:--</div><div class="d" id="clockD"></div></div>
   </header>
 
-  <div class="notice crit" id="secureNote" hidden><b>GPSが使えない開き方です。</b> このファイルは https のURL（GitHub Pages など）で開いてください。ファイルを直接開いたり、アプリ内のプレビューで開くと位置情報を取得できません。</div>
+  <div class="notice crit" id="secureNote" hidden><b>GPSが使えない開き方です。</b> https のURL（GitHub Pages など）で開いてください。</div>
   <div class="notice" id="setupNote" hidden></div>
+  <div class="penban" id="penBanner" hidden></div>
 
   <nav class="tabs" role="tablist">
     <button class="tab" role="tab" id="t-punch" data-tab="punch">打刻</button>
     <button class="tab" role="tab" id="t-class" data-tab="class">授業</button>
+    <button class="tab" role="tab" id="t-pen" data-tab="pen">罰</button>
     <button class="tab" role="tab" id="t-sum" data-tab="sum">集計</button>
     <button class="tab" role="tab" id="t-set" data-tab="set">設定</button>
   </nav>
 
   <!-- 打刻 -->
   <section class="panel" id="p-punch" role="tabpanel">
+    <div class="box">
+      <div class="box-head"><h2>今日やること</h2><button class="btn link sm" data-act="offday" id="offBtn"></button></div>
+      <div class="todo" id="todo"></div>
+      <div class="gpsmsg" id="todoMsg" hidden></div>
+    </div>
     <div id="punch"></div>
     <div class="box">
       <div class="box-head"><h2>今週の作業時間</h2><span class="muted small" id="weekTotal"></span></div>
@@ -199,6 +239,7 @@ td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
       <h2>授業を記録</h2>
       <form class="form" id="classForm">
         <div class="field"><label for="cSubj">科目</label><select id="cSubj"></select></div>
+        <div class="field narrow"><label for="cPeriod">時限</label><select id="cPeriod"></select></div>
         <div class="field" style="flex-basis:100%">
           <span class="lab">種別</span>
           <div class="seg" role="radiogroup" aria-label="種別">
@@ -207,6 +248,7 @@ td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
             <input type="radio" name="cst" id="cst-early" value="early"><label for="cst-early">早退</label>
             <input type="radio" name="cst" id="cst-absent" value="absent"><label for="cst-absent">欠席</label>
             <input type="radio" name="cst" id="cst-official" value="official"><label for="cst-official">公欠</label>
+            <input type="radio" name="cst" id="cst-cancel" value="cancel"><label for="cst-cancel">休講</label>
           </div>
         </div>
         <div class="field narrow" id="cDateWrap" hidden><label for="cDate">日付</label><input type="date" id="cDate"></div>
@@ -224,6 +266,37 @@ td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
     <div class="box">
       <h2>授業の履歴</h2>
       <div class="list" id="classHist"></div>
+    </div>
+  </section>
+
+  <!-- 罰 -->
+  <section class="panel" id="p-pen" role="tabpanel" hidden>
+    <div class="box" id="penHead"></div>
+    <div class="box">
+      <div class="box-head"><h2>罰メニュー</h2><span class="muted small">実行したら押して清算します</span></div>
+      <div class="menu" id="penMenu"></div>
+      <form class="form" id="menuForm">
+        <div class="field"><label for="mName">罰の内容</label><input type="text" id="mName" maxlength="30" required placeholder="例：腕立て50回"></div>
+        <div class="field narrow"><label for="mCost">清算する点数</label><input type="number" id="mCost" min="1" max="100" value="3" required></div>
+        <button class="btn" type="submit">追加</button>
+      </form>
+    </div>
+    <div class="box">
+      <div class="box-head"><h2>罰ポイントの内訳</h2><span class="muted small" id="penSince"></span></div>
+      <div class="list" id="penList"></div>
+    </div>
+    <div class="box">
+      <h2>罰のルール</h2>
+      <form class="form" id="penForm" style="flex-direction:column;align-items:stretch">
+        <label class="check"><input type="checkbox" id="pOn"> 罰制度を使う</label>
+        <div class="form">
+          <div class="field narrow" style="flex-basis:160px"><label for="pSince">数え始める日</label><input type="date" id="pSince"></div>
+          <div class="field narrow" style="flex-basis:160px"><label for="pTh">罰を実行する基準（点）</label><input type="number" id="pTh" min="1" max="100"></div>
+        </div>
+        <div class="ptsgrid" id="ptsGrid"></div>
+        <div><button class="btn primary" type="submit">保存</button></div>
+      </form>
+      <p class="muted small">点数を変えると、過去の分も新しい点数で計算し直されます。休講や学校の休みの日は罰になりません（授業タブの「休講」、打刻タブの「今日は休み」）。</p>
     </div>
   </section>
 
@@ -257,28 +330,47 @@ td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
         <div class="field narrow" style="flex-basis:200px"><label for="gAcc">GPS精度の上限（m）</label><input type="number" id="gAcc" min="10" max="500" required></div>
         <button class="btn" type="submit">保存</button>
       </form>
-      <p class="muted small">精度がこれより悪い（誤差が大きい）ときは打刻できません。校舎の中で通りにくい場合は 100〜150 にしてください。</p>
+      <p class="muted small">誤差がこれより大きいときは打刻できません。校舎の中で通りにくい場合は 100〜150 にしてください。</p>
     </div>
-    <div class="grid2">
-      <div class="box">
-        <h2>科目</h2>
-        <form class="form" id="subForm">
-          <div class="field"><label for="sName">科目名</label><input type="text" id="sName" maxlength="24" required placeholder="例：電気回路Ⅱ"></div>
-          <div class="field narrow"><label for="sHours">年間時数</label><input type="number" id="sHours" min="1" max="600" value="60" required></div>
-          <button class="btn primary" type="submit">追加</button>
-        </form>
-        <p class="muted small">単位時間で入力（1コマ90分＝2単位時間）。2単位の通年科目なら60。</p>
-        <div class="list" id="subList"></div>
-      </div>
-      <div class="box">
-        <h2>欠課のルール</h2>
-        <form class="form" id="ruleForm">
-          <div class="field narrow" style="flex-basis:100%"><label for="rDen">欠課の上限（年間時数の 1/N）</label><input type="number" id="rDen" min="2" max="10" required></div>
-          <div class="field narrow" style="flex-basis:100%"><label for="rLate">遅刻・早退 何回で欠課1時間</label><input type="number" id="rLate" min="1" max="10" required></div>
-          <label style="display:flex;gap:8px;align-items:center;flex-basis:100%"><input type="checkbox" id="rOff"> 公欠も欠課時数に含める</label>
-          <button class="btn primary" type="submit">保存</button>
-        </form>
-      </div>
+    <div class="box">
+      <h2>科目</h2>
+      <form class="form" id="subForm">
+        <div class="field"><label for="sName">科目名</label><input type="text" id="sName" maxlength="24" required placeholder="例：電気回路Ⅱ"></div>
+        <div class="field narrow"><label for="sHours">年間時数</label><input type="number" id="sHours" min="1" max="600" value="60" required></div>
+        <button class="btn primary" type="submit">追加</button>
+      </form>
+      <p class="muted small">単位時間で入力（1コマ90分＝2単位時間）。2単位の通年科目なら60。</p>
+      <div class="list" id="subList"></div>
+    </div>
+    <div class="box">
+      <div class="box-head"><h2>時間割</h2><button class="btn link sm" data-act="preset">後期の時間割を読み込み直す</button></div>
+      <p class="muted small">時間割に入れた授業は、開始から一定時間たっても記録がないと催促され、その日のうちに記録しないと罰ポイントになります。</p>
+      <div class="tablewrap"><table class="tt" id="ttTable"></table></div>
+      <form class="form" id="graceForm">
+        <div class="field narrow" style="flex-basis:220px"><label for="gGrace">授業開始から何分で催促するか</label><input type="number" id="gGrace" min="0" max="90" required></div>
+        <button class="btn" type="submit">保存</button>
+      </form>
+    </div>
+    <div class="box">
+      <h2>ロボコン活動</h2>
+      <form class="form" id="roboForm">
+        <div class="field" style="flex-basis:100%"><span class="lab">活動日</span>
+          <div class="seg" id="roboDays"></div></div>
+        <div class="field narrow" style="flex-basis:150px"><label for="rStart">活動の開始時刻</label><input type="time" id="rStart" required></div>
+        <div class="field narrow" style="flex-basis:150px"><label for="rEnd">活動の終了時刻</label><input type="time" id="rEnd" required></div>
+        <div class="field narrow" style="flex-basis:150px"><label for="rGoal">週の目標（時間）</label><input type="number" id="rGoal" min="0" max="80" step="0.5" required></div>
+        <button class="btn primary" type="submit">保存</button>
+      </form>
+      <p class="muted small">活動日の開始時刻を過ぎても入室していないと催促され、その日に一度も入室しないと罰ポイントになります。目標を 0 にすると週の目標は使いません。</p>
+    </div>
+    <div class="box">
+      <h2>欠課のルール</h2>
+      <form class="form" id="ruleForm">
+        <div class="field narrow" style="flex-basis:200px"><label for="rDen">欠課の上限（年間時数の 1/N）</label><input type="number" id="rDen" min="2" max="10" required></div>
+        <div class="field narrow" style="flex-basis:200px"><label for="rLate">遅刻・早退 何回で欠課1時間</label><input type="number" id="rLate" min="1" max="10" required></div>
+        <label class="check" style="flex-basis:100%"><input type="checkbox" id="rOff"> 公欠も欠課時数に含める</label>
+        <button class="btn primary" type="submit">保存</button>
+      </form>
     </div>
     <div class="box">
       <h2>バックアップ</h2>
@@ -301,41 +393,61 @@ td.n{font-family:var(--f-mono);font-variant-numeric:tabular-nums}
 const $ = id => document.getElementById(id);
 const KEY = "kintai.v1";
 const WD = ["日","月","火","水","木","金","土"];
-const ST = { present:["出席","ok"], late:["遅刻","warn"], early:["早退","warn"], absent:["欠席","crit"], official:["公欠","info"] };
+const ST = { present:["出席","ok"], late:["遅刻","warn"], early:["早退","warn"], absent:["欠席","crit"], official:["公欠","info"], cancel:["休講","off"] };
 const ONSITE = ["present","late","early"];
 const PLACE_DEF = { school:{ name:"学校", lat:null, lon:null, radius:300 }, lab:{ name:"作業場", lat:null, lon:null, radius:100 } };
-const CFG_DEF = { maxAcc:100, limitDen:3, lateUnit:3, officialCounts:false };
+const CFG_DEF = { maxAcc:100, limitDen:3, lateUnit:3, officialCounts:false, grace:15,
+  periods:[["09:00","10:30"],["10:40","12:10"],["13:00","14:30"],["14:40","16:10"],["16:20","17:50"]],
+  roboDays:[1,4,5], roboStart:"18:00", roboEnd:"20:00", weekGoal:6 };
+const PEN_TYPES = [
+  ["miss",   "授業の記録なし（打刻し忘れ・無断欠席）", 3],
+  ["absent", "欠席（公欠・休講は除く）", 2],
+  ["late",   "遅刻", 1],
+  ["early",  "早退", 1],
+  ["noshow", "活動日に作業場へ行かなかった", 2],
+  ["forgot", "退室し忘れ（14時間以上）", 2],
+  ["unverified","位置確認なしの入退室・手動修正", 1],
+  ["goal",   "週の作業目標に届かなかった", 3],
+  ["clean",  "1週間ノーミス（ボーナス）", -2]
+];
+const today = () => ymd(new Date());
+function penDef() { return { on:true, since: today(), threshold:10, pts: Object.fromEntries(PEN_TYPES.map(t => [t[0], t[2]])),
+  menu:[{ id:"p1", name:"腕立て伏せ50回", cost:3 },{ id:"p2", name:"部室の掃除", cost:3 },{ id:"p3", name:"スマホゲーム1日禁止", cost:5 },{ id:"p4", name:"おやつ・ジュース1週間禁止", cost:8 }], paid:[] }; }
 
 /* ---------- 保存 ---------- */
-function blank() { return { v:1, places: JSON.parse(JSON.stringify(PLACE_DEF)), cfg:{ ...CFG_DEF }, subjects:[], sessions:[], logs:[] }; }
+function blank() { return { v:2, places: JSON.parse(JSON.stringify(PLACE_DEF)), cfg: JSON.parse(JSON.stringify(CFG_DEF)), subjects:[], sessions:[], logs:[], tt:{}, offDays:[], penalty: penDef() }; }
+function normalize(x) {
+  const b = blank();
+  const p = { ...b.penalty, ...(x.penalty || {}) }; p.pts = { ...b.penalty.pts, ...((x.penalty || {}).pts || {}) };
+  return { ...b, ...x, v:2, places:{ ...b.places, ...(x.places || {}) }, cfg:{ ...b.cfg, ...(x.cfg || {}) }, tt: x.tt || {}, offDays: x.offDays || [], penalty: p };
+}
 let D = blank(), storageOk = true;
-function load() {
-  try { const raw = localStorage.getItem(KEY); if (raw) { const x = JSON.parse(raw); D = { ...blank(), ...x, places:{ ...blank().places, ...(x.places||{}) }, cfg:{ ...CFG_DEF, ...(x.cfg||{}) } }; } }
-  catch { storageOk = false; }
-}
-function save() {
-  try { localStorage.setItem(KEY, JSON.stringify(D)); }
-  catch { storageOk = false; toast("保存できませんでした。プライベートモードでは記録が残りません"); }
-}
+function load() { try { const raw = localStorage.getItem(KEY); if (raw) D = normalize(JSON.parse(raw)); } catch { storageOk = false; } }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(D)); } catch { storageOk = false; toast("保存できませんでした。プライベートモードでは記録が残りません"); } }
 
 /* ---------- 小物 ---------- */
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const pad = n => String(n).padStart(2,"0");
 const rid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,7);
-const ymd = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+function ymd(d) { return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+const parseD = s => { const [y,m,d] = s.split("-").map(Number); return new Date(y, m-1, d); };
 const md = ms => { const d = new Date(ms); return `${d.getMonth()+1}/${d.getDate()}(${WD[d.getDay()]})`; };
-const mdStr = s => { const [y,m,d] = s.split("-").map(Number); return md(new Date(y,m-1,d).getTime()); };
+const mdStr = s => md(parseD(s).getTime());
 const hm = ms => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const at = (dateStr, hhmm) => { const d = parseD(dateStr); const [h, m] = (hhmm || "00:00").split(":").map(Number); d.setHours(h, m, 0, 0); return d.getTime(); };
 const clock = ms => { const s = Math.floor(Math.max(0,ms)/1000); return `${pad(Math.floor(s/3600))}:${pad(Math.floor(s%3600/60))}:${pad(s%60)}`; };
 const dur = ms => { const m = Math.round(Math.max(0,ms)/60000), h = Math.floor(m/60); return h ? `${h}時間${pad(m%60)}分` : `${m}分`; };
 const hrs = ms => (ms/3600000).toFixed(1);
 const toLocalInput = ms => `${ymd(new Date(ms))}T${hm(ms)}`;
 const fromLocalInput = v => v ? new Date(v).getTime() : null;
 const dayStart = (t = Date.now()) => { const d = new Date(t); d.setHours(0,0,0,0); return d.getTime(); };
-const weekStart = () => { const d = new Date(dayStart()); d.setDate(d.getDate() - ((d.getDay()+6)%7)); return d.getTime(); };
+const weekStartOf = t => { const d = new Date(dayStart(t)); d.setDate(d.getDate() - ((d.getDay()+6)%7)); return d.getTime(); };
+const weekStart = () => weekStartOf(Date.now());
 const monthStart = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1).getTime(); };
+const addDays = (t, n) => { const d = new Date(t); d.setDate(d.getDate() + n); return d.getTime(); };
 const overlap = (s, a, b) => Math.max(0, Math.min(s.end || Date.now(), b) - Math.max(s.start, a));
 const verified = s => !!(s.inGeo && !s.edited && (!s.end || s.outGeo));
+const subjName = id => (D.subjects.find(s => s.id === id) || {}).name || "（削除した科目）";
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 3200); }
 
 /* ---------- GPS ---------- */
@@ -352,7 +464,6 @@ function getPos() {
       { enableHighAccuracy:true, timeout:20000, maximumAge:0 });
   });
 }
-/* 場所の確認：成功すれば geo を返し、失敗すれば理由を投げる。outside のときは geo も添える */
 async function checkAt(key) {
   const p = D.places[key];
   if (p.lat == null) throw { msg:`設定タブで「${p.name}」の場所を登録してください` };
@@ -361,19 +472,75 @@ async function checkAt(key) {
   const acc = Math.round(accuracy), dist = Math.round(distM(p.lat, p.lon, lat, lon));
   const geo = { place:key, lat:+lat.toFixed(6), lon:+lon.toFixed(6), acc, dist, at:Date.now() };
   if (Date.now() - pos.timestamp > 120000) throw { msg:"古い位置情報が返されました。もう一度試してください" };
-  if (acc > D.cfg.maxAcc) throw { msg:`GPSの誤差が大きすぎます（±${acc}m、上限${D.cfg.maxAcc}m）。屋外か窓際でもう一度試してください`, geo, kind:"acc" };
-  if (dist > p.radius) throw { msg:`${p.name}から${dist}m離れています（許容 ${p.radius}m 以内）`, geo, kind:"far" };
+  if (acc > D.cfg.maxAcc) throw { msg:`GPSの誤差が大きすぎます（±${acc}m、上限${D.cfg.maxAcc}m）。屋外か窓際でもう一度試してください`, geo };
+  if (dist > p.radius) throw { msg:`${p.name}から${dist}m離れています（許容 ${p.radius}m 以内）`, geo };
   return geo;
 }
 const geoText = g => g ? `${g.dist}m・誤差±${g.acc}m` : "";
 
+/* ---------- 時間割 ---------- */
+function slotsOn(dateStr) {
+  const wd = parseD(dateStr).getDay();
+  return D.cfg.periods.map((p, i) => ({ period: i+1, subjectId: D.tt[`${wd}-${i+1}`], start: at(dateStr, p[0]), end: at(dateStr, p[1]) }))
+    .filter(s => s.subjectId && D.subjects.some(x => x.id === s.subjectId));
+}
+const logFor = (dateStr, slot) => D.logs.find(l => l.date === dateStr && l.subjectId === slot.subjectId && (l.period == null || l.period === slot.period));
+const isOff = dateStr => D.offDays.includes(dateStr);
+function currentPeriod() {
+  const n = Date.now(), d = today();
+  const i = D.cfg.periods.findIndex(p => n >= at(d, p[0]) - 15*60000 && n <= at(d, p[1]));
+  return i < 0 ? "" : String(i+1);
+}
+
+/* ---------- 罰ポイント ---------- */
+function penaltyEvents() {
+  const P = D.penalty; if (!P.on) return [];
+  const ev = [], now = Date.now(), since = P.since || today(), sinceMs = parseD(since).getTime();
+  const add = (date, type, detail) => { const pts = +P.pts[type] || 0; if (pts) ev.push({ date, type, detail, pts }); };
+  for (const l of D.logs) if (l.date >= since) {
+    if (l.status === "late" || l.status === "early" || l.status === "absent") add(l.date, l.status, subjName(l.subjectId) + (l.period ? ` ${l.period}限` : ""));
+  }
+  for (const s of D.sessions) {
+    const d = ymd(new Date(s.start)); if (d < since) continue;
+    if (!s.end && now - s.start > 14*3600000) add(d, "forgot", `${hm(s.start)} から退室していない`);
+    else if (s.end && !verified(s)) add(d, "unverified", s.edited ? "時刻を手で修正" : !s.inGeo ? "手動で追加" : "退室時に位置確認なし");
+  }
+  const todayStr = today();
+  for (let t = sinceMs, n = 0; ymd(new Date(t)) <= todayStr && n < 500; t = addDays(t, 1), n++) {
+    const d = ymd(new Date(t)); if (isOff(d)) continue;
+    const dayOver = d < todayStr;
+    for (const s of slotsOn(d)) {
+      if (!dayOver) continue;
+      if (!logFor(d, s)) add(d, "miss", `${s.period}限 ${subjName(s.subjectId)}`);
+    }
+    const wd = new Date(t).getDay();
+    if (dayOver && D.cfg.roboDays.includes(wd) && !D.sessions.some(s => ymd(new Date(s.start)) === d)) add(d, "noshow", "作業場への入室なし");
+  }
+  const goal = +D.cfg.weekGoal || 0;
+  for (let w = weekStartOf(sinceMs); addDays(w, 7) <= now; w = addDays(w, 7)) {
+    if (w < sinceMs) continue;
+    const we = addDays(w, 7), ws = ymd(new Date(w)), wEnd = ymd(new Date(we - 1));
+    const h = D.sessions.reduce((a, s) => a + overlap(s, w, we), 0);
+    const bad = ev.some(e => e.pts > 0 && e.date >= ws && e.date <= wEnd);
+    if (goal > 0 && h < goal*3600000) add(wEnd, "goal", `${md(w)}〜の週：${hrs(h)} / ${goal} 時間`);
+    else if (!bad) add(wEnd, "clean", `${md(w)}〜の週`);
+  }
+  return ev.sort((a, b) => b.date.localeCompare(a.date));
+}
+function penaltyState() {
+  const ev = penaltyEvents(), P = D.penalty;
+  const paid = P.paid.filter(p => !P.since || ymd(new Date(p.ts)) >= P.since);
+  const bal = ev.reduce((a, e) => a + e.pts, 0) - paid.reduce((a, p) => a + p.cost, 0);
+  return { ev, paid, bal, due: P.on && bal >= P.threshold };
+}
+const penLabel = type => (PEN_TYPES.find(t => t[0] === type) || [, type])[1];
+
 /* ---------- 状態 ---------- */
 let tab = "punch", busy = false, punchMsg = null, pendingOut = null, punchDraft = null;
-let editing = null, draft = null, armed = null, armTimer = null, ruleDirty = false, accDirty = false, placeDraft = {};
+let editing = null, draft = null, armed = null, armTimer = null, dirty = {}, placeDraft = {};
 const openSess = () => D.sessions.find(s => !s.end);
-const subjects = () => D.subjects;
 function arm(key) { armed = key; clearTimeout(armTimer); armTimer = setTimeout(() => { armed = null; render(); }, 4000); render(); }
-const delBtn = (key, act, id) => `<button class="btn link sm ${armed === key ? "danger armed" : ""}" data-act="${act}" data-id="${id}">${armed === key ? "本当に削除" : "削除"}</button>`;
+const delBtn = (key, act, id, label = "削除") => `<button class="btn link sm ${armed === key ? "danger armed" : ""}" data-act="${act}" data-id="${id}">${armed === key ? "本当に" + label : label}</button>`;
 
 function tally(subj) {
   let ab = 0, off = 0, late = 0, pres = 0;
@@ -381,7 +548,7 @@ function tally(subj) {
     if (l.status === "absent") ab += +l.hours || 0;
     else if (l.status === "official") off += +l.hours || 0;
     else if (l.status === "present") pres += 1;
-    else { late += 1; pres += 1; }
+    else if (l.status === "late" || l.status === "early") { late += 1; pres += 1; }
   }
   const c = D.cfg, conv = Math.floor(late / Math.max(1, c.lateUnit));
   const total = ab + conv + (c.officialCounts ? off : 0);
@@ -394,23 +561,65 @@ const LV = { ok:["余裕あり","ok"], warn:["注意","warn"], crit:["危険","c
 
 /* ---------- 描画 ---------- */
 function render() {
-  renderNotes(); renderPunch(); renderWeek(); renderSessions(); renderClass(); renderSummary(); renderSettings(); tick();
+  const ps = penaltyState();
+  renderNotes(ps); renderTodo(ps); renderPunch(); renderWeek(); renderSessions(); renderClass(); renderPen(ps); renderSummary(); renderSettings(); tick();
 }
-function renderNotes() {
+function renderNotes(ps) {
   $("secureNote").hidden = !!(window.isSecureContext && navigator.geolocation);
   const miss = Object.values(D.places).filter(p => p.lat == null).map(p => p.name);
-  const n = $("setupNote");
   const msgs = [];
   if (miss.length) msgs.push(`まず設定タブで「${miss.join("」「")}」の場所を登録してください。`);
-  if (!D.subjects.length) msgs.push("授業の記録には、設定タブで科目の登録が必要です。");
+  if (!D.subjects.length) msgs.push("設定タブで科目と時間割を登録すると、授業の催促が始まります。");
   if (!storageOk) msgs.push("このブラウザでは記録を保存できません（プライベートモードなど）。");
-  n.hidden = !msgs.length; n.textContent = msgs.join(" ");
+  $("setupNote").hidden = !msgs.length; $("setupNote").textContent = msgs.join(" ");
+  const b = $("penBanner");
+  b.hidden = !ps.due;
+  if (ps.due) b.innerHTML = `<span>罰の執行待ち：罰ポイント ${ps.bal}点（基準 ${D.penalty.threshold}点）</span><button class="btn sm" data-tab="pen">罰を実行する</button>`;
+  $("t-pen").innerHTML = `罰${ps.due ? `<span class="badge">${ps.bal}</span>` : ""}`;
+}
+function renderTodo(ps) {
+  const d = today(), now = Date.now(), items = [], done = [];
+  const off = isOff(d);
+  $("offBtn").textContent = off ? "休みを取り消す" : "今日は休み（祝日・行事）";
+  if (ps.due) items.push({ lv:"crit", t:`罰の執行待ち（${ps.bal}点）`, s:"罰タブでメニューから1つ実行して清算してください", acts:`<button class="btn sm danger" data-tab="pen">罰タブへ</button>` });
+  const o = openSess();
+  if (o && now - o.start <= 14*3600000 && now > at(d, D.cfg.roboEnd || "20:00") && dayStart(o.start) === dayStart()) items.push({ lv:"warn", t:`活動終了（${D.cfg.roboEnd}）を過ぎています`, s:"帰る前に作業場で「退室する」を押してください" });
+  if (o && now - o.start > 14*3600000) items.push({ lv:"crit", t:"退室し忘れていませんか", s:`${md(o.start)} ${hm(o.start)} から入室したままです。このままだと罰ポイントになります`, acts:`<button class="btn sm" data-act="sess-edit" data-id="${o.id}">時刻を直す</button>` });
+  if (!off) {
+    for (const s of slotsOn(d)) {
+      const l = logFor(d, s), name = `${s.period}限 ${esc(subjName(s.subjectId))}`;
+      if (l) { done.push(`${name}：${ST[l.status][0]}`); continue; }
+      const p = s.period, a = `data-period="${p}" data-subject="${s.subjectId}"`;
+      if (now < s.start - 15*60000) { items.push({ lv:"", t:`${name}`, s:`${hm(s.start)} 開始` }); continue; }
+      if (now < s.start + D.cfg.grace*60000) items.push({ lv:"info", t:`${name} の出席を打刻`, s:`${hm(s.start)} 開始。学校の中で押してください`, acts:`<button class="btn sm primary" data-act="slot" data-st="present" ${a} ${busy ? "disabled" : ""}>出席を打刻</button>` });
+      else items.push({ lv: now > s.end ? "crit" : "warn", t:`${name} がまだ記録されていません`, s:`今日中に記録しないと罰ポイント +${D.penalty.pts.miss || 0}`,
+        acts:`${now < s.end ? `<button class="btn sm primary" data-act="slot" data-st="late" ${a} ${busy ? "disabled" : ""}>遅刻で打刻</button>` : ""}<button class="btn sm" data-act="slot" data-st="absent" ${a}>欠席</button><button class="btn sm" data-act="slot" data-st="official" ${a}>公欠</button><button class="btn sm" data-act="slot" data-st="cancel" ${a}>休講</button>` });
+    }
+    const wd = new Date().getDay();
+    if (D.cfg.roboDays.includes(wd) && !D.sessions.some(s => ymd(new Date(s.start)) === d)) {
+      const st = at(d, D.cfg.roboStart);
+      if (now >= st) items.push({ lv:"warn", t:"今日は活動日です。作業場に入室していません", s:`${D.cfg.roboStart} 開始。今日中に入室しないと罰ポイント +${D.penalty.pts.noshow || 0}` });
+      else items.push({ lv:"", t:"ロボコン活動", s:`${D.cfg.roboStart}〜${D.cfg.roboEnd || ""}` });
+    }
+  }
+  const goal = +D.cfg.weekGoal || 0;
+  if (goal > 0) {
+    const ws = weekStart(), h = D.sessions.reduce((a, s) => a + overlap(s, ws, addDays(ws, 7)), 0), left = goal*3600000 - h;
+    const daysLeft = 7 - ((new Date().getDay() + 6) % 7);
+    if (left > 0) items.push({ lv: left / 3600000 > daysLeft * 3 ? "warn" : "info", t:`今週の目標まであと ${hrs(left)} 時間`, s:`目標 ${goal} 時間・今週は残り${daysLeft}日（日曜まで）` });
+    else done.push(`今週の目標 ${goal} 時間 達成`);
+  }
+  for (const s of D.subjects) { const t = tally(s); if (t.lv === "crit" || t.lv === "over") items.push({ lv:"crit", t:`${esc(s.name)} の欠課が${t.lv === "over" ? "上限を超えています" : "上限に近いです"}`, s:`欠課 ${t.total} / 上限 ${t.limit} 単位時間。もう休めません` }); }
+  $("todo").innerHTML = (off ? `<div class="it info"><span></span><div class="tx"><b>今日は休みの日に設定されています</b><span>授業と活動日の催促・罰はありません</span></div></div>` : "")
+    + items.map(i => `<div class="it ${i.lv}"><span></span><div class="tx"><b>${i.t}</b><span>${i.s}</span>${i.acts ? `<div class="btnrow">${i.acts}</div>` : ""}</div></div>`).join("")
+    + (!items.length && !off ? `<p class="empty">今やることはありません</p>` : "")
+    + (done.length ? `<div class="done">${done.map(x => `<span>✓ ${x}</span>`).join("")}</div>` : "");
 }
 function renderPunch() {
   const o = openSess(), lab = D.places.lab;
   const todayMs = D.sessions.reduce((a, s) => a + overlap(s, dayStart(), dayStart() + 864e5), 0);
   let msg = "";
-  if (pendingOut) msg = `<div class="gpsmsg crit">${esc(pendingOut.msg)}<div class="btnrow" style="margin-top:8px"><button class="btn sm danger" data-act="force-out">位置未確認として退室</button><button class="btn sm" data-act="cancel-out">やめる</button></div></div>`;
+  if (pendingOut) msg = `<div class="gpsmsg crit">${esc(pendingOut.msg)}<div class="btnrow" style="margin-top:8px"><button class="btn sm danger" data-act="force-out">位置未確認として退室（罰 +${D.penalty.on ? D.penalty.pts.unverified || 0 : 0}）</button><button class="btn sm" data-act="cancel-out">やめる</button></div></div>`;
   else if (punchMsg) msg = `<div class="gpsmsg ${punchMsg.cls}">${esc(punchMsg.text)}</div>`;
   $("punch").innerHTML = `<div class="punch">
     <div>
@@ -421,24 +630,24 @@ function renderPunch() {
     </div>
     <div class="side">
       <input type="text" id="punchNote" maxlength="80" placeholder="作業メモ（任意）例：足回りの配線" value="${esc(punchDraft ?? (o ? o.note || "" : ""))}" aria-label="作業メモ">
-      <button class="btn big ${o ? "out" : "primary"}" data-act="punch" ${busy ? "disabled" : ""}>${busy ? "位置を確認中…" : o ? "退室する" : "入室する"}</button>
+      <button class="btn big ${o ? "out" : "primary"}" data-act="punch" ${busy ? "disabled" : ""}>${busy === "punch" ? "位置を確認中…" : o ? "退室する" : "入室する"}</button>
       ${msg}
     </div>
   </div>`;
 }
 function renderWeek() {
-  const ws = weekStart(), today = dayStart();
+  const ws = weekStart(), td = dayStart();
   let total = 0;
   const days = Array.from({ length:7 }, (_, i) => {
-    const a = ws + i*864e5, b = a + 864e5;
+    const a = addDays(ws, i), b = addDays(a, 1);
     let v = 0, u = 0;
     for (const s of D.sessions) { const x = overlap(s, a, b); if (verified(s)) v += x; else u += x; }
     total += v + u;
     return { a, v, u };
   });
   const max = Math.max(3*3600000, ...days.map(d => d.v + d.u));
-  $("weekTotal").textContent = `合計 ${hrs(total)} 時間`;
-  $("weekBars").innerHTML = days.map(d => `<div class="bar"><span class="n ${d.a === today ? "today" : ""}">${md(d.a)}</span>
+  $("weekTotal").textContent = `合計 ${hrs(total)} 時間${+D.cfg.weekGoal ? ` / 目標 ${D.cfg.weekGoal} 時間` : ""}`;
+  $("weekBars").innerHTML = days.map(d => `<div class="bar"><span class="n ${d.a === td ? "today" : ""}">${md(d.a)}</span>
     <div class="track"><div class="fill" style="width:${(d.v/max*100).toFixed(1)}%"></div><div class="fill unv" style="width:${(d.u/max*100).toFixed(1)}%"></div></div>
     <span class="v">${d.v + d.u ? hrs(d.v + d.u) + " h" : "—"}</span></div>`).join("");
 }
@@ -453,7 +662,7 @@ function sessEditor(s) {
     <div class="field"><label for="eStart">入室</label><input type="datetime-local" id="eStart" value="${draft.start}" required></div>
     <div class="field"><label for="eEnd">退室（空欄で作業中）</label><input type="datetime-local" id="eEnd" value="${draft.end}"></div>
     <div class="field" style="flex-basis:100%"><label for="eNote">メモ</label><input type="text" id="eNote" maxlength="80" value="${esc(draft.note)}"></div>
-    ${s && s.inGeo ? `<p class="small muted" style="flex-basis:100%">時刻を変えると「手動修正」の記録になり、位置確認済みの扱いではなくなります。</p>` : ""}
+    <p class="small muted" style="flex-basis:100%">${s && s.inGeo ? "時刻を変えると「手動修正」になり、" : "手で入れた記録は"}位置確認なしの扱い（罰 +${D.penalty.on ? D.penalty.pts.unverified || 0 : 0}）になります。</p>
     <div class="btnrow"><button class="btn primary" type="submit">保存</button><button class="btn" type="button" data-act="sess-cancel">キャンセル</button>${s ? delBtn("s:" + s.id, "sess-del", s.id) : ""}</div>
   </form></div>`;
 }
@@ -477,12 +686,15 @@ function renderClass() {
   const cs = $("cSubj"), cur = cs.value;
   cs.innerHTML = D.subjects.length ? D.subjects.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("") : `<option value="">（設定タブで科目を登録）</option>`;
   if (D.subjects.some(s => s.id === cur)) cs.value = cur;
+  const cp = $("cPeriod"), pcur = cp.dataset.touched ? cp.value : currentPeriod();
+  cp.innerHTML = `<option value="">－</option>` + D.cfg.periods.map((p, i) => `<option value="${i+1}">${i+1}限 ${p[0]}</option>`).join("");
+  cp.value = pcur;
   const st = curStatus(), onsite = ONSITE.includes(st);
   $("cDateWrap").hidden = onsite;
-  $("cHoursWrap").hidden = st === "late" || st === "early";
-  $("cSubmit").textContent = busy && onsite ? "位置を確認中…" : onsite ? "位置を確認して記録" : "記録する";
-  $("cSubmit").disabled = busy;
-  $("classHint").textContent = onsite ? `出席・遅刻・早退は、${D.places.school.name}の中にいるときに今の時刻で記録します。` : "欠席・公欠は位置確認なしで、日付を選んで記録できます。";
+  $("cHoursWrap").hidden = !(st === "absent" || st === "official");
+  $("cSubmit").textContent = busy === "class" ? "位置を確認中…" : onsite ? "位置を確認して記録" : "記録する";
+  $("cSubmit").disabled = !!busy;
+  $("classHint").textContent = onsite ? `出席・遅刻・早退は、${D.places.school.name}の中にいるときに今の時刻で記録します。` : st === "cancel" ? "休講は欠課にも罰にもなりません。" : "欠席・公欠は位置確認なしで、日付を選んで記録できます。";
   const c = D.cfg;
   $("ruleText").textContent = `上限 年間時数の1/${c.limitDen}・遅刻早退${c.lateUnit}回で1時間・公欠は${c.officialCounts ? "含める" : "含めない"}`;
   $("subjects").innerHTML = D.subjects.length ? D.subjects.map(s => {
@@ -494,20 +706,47 @@ function renderClass() {
       <div class="det">${t.left >= 0 ? `あと${t.left}時間まで` : `${-t.left}時間超過`}・出席${t.pres}回・欠席${t.ab}・遅刻早退${t.late}回(→${t.conv})・公欠${t.off}</div>
     </div>`;
   }).join("") : `<p class="empty">設定タブで科目を登録すると、ここに欠課時数が表示されます</p>`;
-  const logs = [...D.logs].sort((a,b) => (b.date||"").localeCompare(a.date||"") || (b.ts||0) - (a.ts||0)).slice(0, 100);
+  const logs = [...D.logs].sort((a,b) => (b.date||"").localeCompare(a.date||"") || (b.period||0) - (a.period||0) || (b.ts||0) - (a.ts||0)).slice(0, 100);
   $("classHist").innerHTML = logs.length ? logs.map(l => {
-    const [lab, cls] = ST[l.status] || ["?","off"], sub = D.subjects.find(s => s.id === l.subjectId);
+    const [lab, cls] = ST[l.status] || ["?","off"];
     const badge = ONSITE.includes(l.status) ? (l.geo ? `<span class="pill ok" title="${geoText(l.geo)}">位置確認済み</span>` : `<span class="pill off">手動</span>`) : "";
     return `<div class="row"><span class="date">${mdStr(l.date)}</span>
-      <div class="main"><b>${esc(sub ? sub.name : "（削除した科目）")}</b><span class="pill ${cls}">${lab}</span>${l.ts && ONSITE.includes(l.status) ? `<span class="mono small muted">${hm(l.ts)}</span>` : ""}${l.status === "absent" || l.status === "official" ? `<span class="mono small">${l.hours}時間</span>` : ""}${badge}</div>
+      <div class="main">${l.period ? `<span class="mono small muted">${l.period}限</span>` : ""}<b>${esc(subjName(l.subjectId))}</b><span class="pill ${cls}">${lab}</span>${l.ts && ONSITE.includes(l.status) ? `<span class="mono small muted">${hm(l.ts)}</span>` : ""}${l.status === "absent" || l.status === "official" ? `<span class="mono small">${l.hours}時間</span>` : ""}${badge}</div>
       <div>${delBtn("l:" + l.id, "log-del", l.id)}</div>
       ${l.note ? `<div class="note">${esc(l.note)}</div>` : ""}</div>`;
   }).join("") : `<p class="empty">まだ記録がありません</p>`;
 }
+function renderPen(ps) {
+  const P = D.penalty, th = P.threshold;
+  if (!P.on) {
+    $("penHead").innerHTML = `<h2>罰制度はオフです</h2><p class="muted small">下の「罰のルール」でオンにすると、違反が罰ポイントとして数えられます。</p>`;
+  } else {
+    const ratio = Math.max(0, Math.min(1, ps.bal / th));
+    $("penHead").innerHTML = `<div class="penhead">
+      <div class="big ${ps.due ? "crit" : ps.bal <= 0 ? "ok" : ""}">${ps.bal}<span style="font-size:1rem"> 点</span></div>
+      <div><b>${ps.due ? "罰の執行待ちです" : ps.bal < 0 ? `${-ps.bal}点の貯金があります` : `罰まであと ${th - ps.bal} 点`}</b><div class="muted small">基準 ${th} 点に達したら、罰メニューから実行して清算します</div></div>
+      <div class="meter ${ps.due ? "crit" : ""}" role="img" aria-label="罰ポイント ${ps.bal} / ${th}"><i style="width:${(ratio*100).toFixed(0)}%"></i></div>
+    </div>`;
+  }
+  $("penMenu").innerHTML = P.menu.length ? P.menu.map(m => `<div class="m">
+    <div class="h"><b>${esc(m.name)}</b><span class="mono">−${m.cost}点</span></div>
+    <div class="btnrow"><button class="btn sm ${armed === "pay:" + m.id ? "danger armed" : ps.due ? "primary" : ""}" data-act="pay" data-id="${m.id}">${armed === "pay:" + m.id ? "本当に実行した" : "実行した"}</button>${delBtn("menu:" + m.id, "menu-del", m.id)}</div>
+  </div>`).join("") : `<p class="empty">罰メニューがありません。下から追加してください</p>`;
+  $("penSince").textContent = P.on ? `${mdStr(P.since)} から` : "";
+  const rows = [
+    ...ps.ev.map(e => ({ date: e.date, html: `<div class="main"><b>${penLabel(e.type)}</b><span class="muted small">${esc(e.detail)}</span></div><span class="pts ${e.pts > 0 ? "plus" : "minus"}">${e.pts > 0 ? "+" : "−"}${Math.abs(e.pts)}</span>` })),
+    ...ps.paid.map(p => ({ date: ymd(new Date(p.ts)), ts: p.ts, html: `<div class="main"><span class="pill ok">罰を実行</span><b>${esc(p.name)}</b></div><span class="pts minus">−${p.cost}</span>` }))
+  ].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 150);
+  $("penList").innerHTML = rows.length ? rows.map(r => `<div class="row"><span class="date">${mdStr(r.date)}</span>${r.html}</div>`).join("") : `<p class="empty">${P.on ? "まだ違反はありません" : "罰制度はオフです"}</p>`;
+  if (!dirty.pen) {
+    $("pOn").checked = !!P.on; $("pSince").value = P.since || today(); $("pTh").value = P.threshold;
+    $("ptsGrid").innerHTML = PEN_TYPES.map(([k, l]) => `<label for="pp-${k}">${l}</label><input type="number" id="pp-${k}" min="-20" max="20" value="${P.pts[k]}">`).join("");
+  }
+}
 function renderSummary() {
   const ws = weekStart(), ms = monthStart(), now = Date.now() + 1;
   const sum = (a, b, f) => D.sessions.filter(f).reduce((x, s) => x + overlap(s, a, b), 0);
-  const wk = sum(ws, ws + 7*864e5, () => true), mo = sum(ms, now, () => true), moV = sum(ms, now, verified);
+  const wk = sum(ws, addDays(ws, 7), () => true), mo = sum(ms, now, () => true), moV = sum(ms, now, verified);
   const cnt = D.sessions.filter(s => s.start >= ms).length;
   $("monthLabel").textContent = `${new Date().getMonth()+1}月の集計`;
   $("roboStats").innerHTML = [
@@ -533,10 +772,19 @@ function renderSettings() {
       ${p.lat != null ? `<a class="btn sm" style="text-decoration:none;display:inline-flex;align-items:center" href="https://www.google.com/maps?q=${p.lat},${p.lon}" target="_blank" rel="noopener">地図で確認</a>` : ""}</div>
     </div>`;
   }).join("");
-  if (!accDirty) $("gAcc").value = D.cfg.maxAcc;
+  if (!dirty.acc) $("gAcc").value = D.cfg.maxAcc;
+  if (!dirty.grace) $("gGrace").value = D.cfg.grace;
   $("subList").innerHTML = D.subjects.length ? D.subjects.map(s => `<div class="row"><span class="date">${s.hours}時間</span><div class="main"><b>${esc(s.name)}</b><span class="muted small">上限${Math.floor(s.hours / Math.max(1, D.cfg.limitDen))}時間</span></div><div>${delBtn("u:" + s.id, "sub-del", s.id)}</div></div>`).join("")
     : `<p class="empty">まだ科目がありません</p>`;
-  if (!ruleDirty) { $("rDen").value = D.cfg.limitDen; $("rLate").value = D.cfg.lateUnit; $("rOff").checked = !!D.cfg.officialCounts; }
+  const opts = sel => `<option value="">－</option>` + D.subjects.map(s => `<option value="${s.id}" ${s.id === sel ? "selected" : ""}>${esc(s.name)}</option>`).join("");
+  $("ttTable").innerHTML = `<thead><tr><th>時限</th>${[1,2,3,4,5].map(w => `<th>${WD[w]}</th>`).join("")}</tr></thead><tbody>`
+    + D.cfg.periods.map((p, i) => `<tr><td><div class="mono small"><b>${i+1}限</b></div><input type="time" data-pt="${i}-0" value="${p[0]}" aria-label="${i+1}限 開始"><input type="time" data-pt="${i}-1" value="${p[1]}" aria-label="${i+1}限 終了"></td>`
+      + [1,2,3,4,5].map(w => `<td><select data-tt="${w}-${i+1}" aria-label="${WD[w]}曜 ${i+1}限">${opts(D.tt[`${w}-${i+1}`])}</select></td>`).join("") + `</tr>`).join("") + `</tbody>`;
+  if (!dirty.robo) {
+    $("roboDays").innerHTML = [1,2,3,4,5,6,0].map(w => `<input type="checkbox" id="rd-${w}" value="${w}" ${D.cfg.roboDays.includes(w) ? "checked" : ""}><label for="rd-${w}">${WD[w]}</label>`).join("");
+    $("rStart").value = D.cfg.roboStart; $("rEnd").value = D.cfg.roboEnd || "20:00"; $("rGoal").value = D.cfg.weekGoal;
+  }
+  if (!dirty.rule) { $("rDen").value = D.cfg.limitDen; $("rLate").value = D.cfg.lateUnit; $("rOff").checked = !!D.cfg.officialCounts; }
   const w = document.querySelector('[data-act="wipe"]'); if (w) { w.classList.toggle("armed", armed === "wipe"); w.textContent = armed === "wipe" ? "本当にすべて消す" : "すべての記録を消す"; }
 }
 function tick() {
@@ -547,15 +795,16 @@ function tick() {
 }
 function setTab(t) {
   tab = t;
-  for (const k of ["punch","class","sum","set"]) { $("p-" + k).hidden = k !== t; $("t-" + k).setAttribute("aria-selected", k === t); }
+  for (const k of ["punch","class","pen","sum","set"]) { $("p-" + k).hidden = k !== t; $("t-" + k).setAttribute("aria-selected", k === t); }
   try { sessionStorage.setItem("kintai.tab", t); } catch {}
+  window.scrollTo(0, 0);
 }
 
 /* ---------- 操作 ---------- */
 async function doPunch() {
   if (busy) return;
   const o = openSess(), note = ($("punchNote") || {}).value || "";
-  busy = true; punchMsg = null; pendingOut = null; render();
+  busy = "punch"; punchMsg = null; pendingOut = null; render();
   try {
     const geo = await checkAt("lab");
     if (o) { Object.assign(o, { end: Date.now(), outGeo: geo, note: note.trim() }); punchMsg = { cls:"ok", text:`退室しました（${geoText(geo)}）` }; }
@@ -567,32 +816,29 @@ async function doPunch() {
   }
   busy = false; render();
 }
-async function doClass(form) {
-  const subjectId = $("cSubj").value;
-  if (!subjectId) { toast("先に設定タブで科目を登録してください"); return; }
-  const status = curStatus(), onsite = ONSITE.includes(status), msg = $("classMsg");
-  const rec = { id: rid(), subjectId, status, hours: status === "absent" || status === "official" ? Math.max(1, Math.min(12, +$("cHours").value || 2)) : 0, note: $("cNote").value.trim(), ts: Date.now() };
+/* 授業の記録（フォーム・今日やること共通） */
+async function recordClass({ subjectId, status, period, date, hours, note }, msgEl, busyKey) {
+  const onsite = ONSITE.includes(status);
+  const rec = { id: rid(), subjectId, status, period: period ? +period : null, hours: status === "absent" || status === "official" ? Math.max(1, Math.min(12, +hours || 2)) : 0, note: note || "", ts: Date.now(), date: date || today(), geo: null };
   if (onsite) {
-    busy = true; msg.hidden = true; render();
-    try { rec.geo = await checkAt("school"); rec.date = ymd(new Date()); }
-    catch (e) { busy = false; msg.hidden = false; msg.className = "gpsmsg crit"; msg.textContent = e.msg + "　記録していません。"; render(); return; }
+    busy = busyKey; msgEl.hidden = true; render();
+    try { rec.geo = await checkAt("school"); rec.date = today(); }
+    catch (e) { busy = false; msgEl.hidden = false; msgEl.className = "gpsmsg crit"; msgEl.textContent = e.msg + "　記録していません。"; render(); return false; }
     busy = false;
-    msg.hidden = false; msg.className = "gpsmsg ok"; msg.textContent = `${ST[status][0]}を記録しました（${geoText(rec.geo)}）`;
-  } else {
-    rec.date = $("cDate").value || ymd(new Date()); rec.geo = null;
-    msg.hidden = false; msg.className = "gpsmsg"; msg.textContent = `${ST[status][0]}を記録しました`;
   }
-  D.logs.push(rec); save(); $("cNote").value = ""; render();
+  D.logs.push(rec); save();
+  msgEl.hidden = false; msgEl.className = onsite ? "gpsmsg ok" : "gpsmsg";
+  msgEl.textContent = `${subjName(subjectId)}：${ST[status][0]}を記録しました${onsite ? `（${geoText(rec.geo)}）` : ""}`;
+  render(); return true;
 }
 async function placeHere(key) {
   if (busy) return;
   busy = "place-" + key; render();
   try {
-    const pos = await getPos();
-    const p = D.places[key];
+    const pos = await getPos(), p = D.places[key];
     Object.assign(p, { lat: pos.coords.latitude, lon: pos.coords.longitude, acc: Math.round(pos.coords.accuracy) });
-    save(); toast(`${p.name}を登録しました（誤差±${p.acc}m）`);
-    if (p.acc > 50) toast(`登録しましたが誤差が±${p.acc}mあります。屋外でもう一度登録すると正確になります`);
+    save();
+    toast(p.acc > 50 ? `登録しましたが誤差が±${p.acc}mあります。屋外でもう一度登録すると正確になります` : `${p.name}を登録しました（誤差±${p.acc}m）`);
   } catch (e) { toast(e.msg); }
   busy = false; render();
 }
@@ -602,54 +848,65 @@ function download(name, text, type) {
 }
 const csvCell = v => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
 function exportCsv(kind) {
-  const stamp = ymd(new Date()).replace(/-/g,"");
+  const stamp = today().replace(/-/g,"");
   let rows;
   if (kind === "robo") rows = [["日付","入室","退室","作業時間(分)","確認","入室時の距離(m)","入室時の誤差(m)","退室時の距離(m)","メモ"],
     ...[...D.sessions].sort((a,b) => a.start - b.start).map(s => [ymd(new Date(s.start)), hm(s.start), s.end ? toLocalInput(s.end).replace("T"," ") : "作業中", s.end ? Math.round((s.end-s.start)/60000) : "",
       s.edited ? "手動修正" : !s.inGeo ? "手動" : s.end && !s.outGeo ? "退室未確認" : "確認済み", s.inGeo ? s.inGeo.dist : "", s.inGeo ? s.inGeo.acc : "", s.outGeo ? s.outGeo.dist : "", s.note || ""])];
-  else rows = [["日付","時刻","科目","種別","時数","確認","距離(m)","メモ"],
-    ...[...D.logs].sort((a,b) => (a.date||"").localeCompare(b.date||"")).map(l => [l.date, ONSITE.includes(l.status) ? hm(l.ts) : "", (D.subjects.find(s => s.id === l.subjectId) || {}).name || "", (ST[l.status]||["?"])[0], l.hours || "",
+  else rows = [["日付","時限","時刻","科目","種別","時数","確認","距離(m)","メモ"],
+    ...[...D.logs].sort((a,b) => (a.date||"").localeCompare(b.date||"") || (a.period||0) - (b.period||0)).map(l => [l.date, l.period || "", ONSITE.includes(l.status) ? hm(l.ts) : "", subjName(l.subjectId), (ST[l.status]||["?"])[0], l.hours || "",
       ONSITE.includes(l.status) ? (l.geo ? "確認済み" : "手動") : "", l.geo ? l.geo.dist : "", l.note || ""])];
   download(`${kind === "robo" ? "ロボコン入退室" : "授業記録"}_${stamp}.csv`, "﻿" + rows.map(r => r.map(csvCell).join(",")).join("\r\n"), "text/csv");
 }
 
 document.addEventListener("click", e => {
-  const b = e.target.closest("[data-act],[data-tab]"); if (!b) return;
+  const b = e.target.closest("[data-act],[data-tab]"); if (!b || b.disabled) return;
   if (b.dataset.tab) { setTab(b.dataset.tab); return; }
   const a = b.dataset.act, id = b.dataset.id;
   if (a === "punch") return doPunch();
   if (a === "force-out") { const o = openSess(); if (o && pendingOut) { Object.assign(o, { end: Date.now(), outGeo: null, outTry: pendingOut.geo, note: (pendingOut.note || "").trim() }); save(); punchMsg = { cls:"", text:"位置未確認として退室を記録しました" }; } pendingOut = null; punchDraft = null; render(); return; }
   if (a === "cancel-out") { pendingOut = null; render(); return; }
-  if (a === "sess-new") { const n = Date.now(); editing = "new"; draft = { start: toLocalInput(n - 3600000), end: toLocalInput(n), note: "" }; renderSessions(); return; }
-  if (a === "sess-edit") { const s = D.sessions.find(x => x.id === id); editing = id; draft = { start: toLocalInput(s.start), end: s.end ? toLocalInput(s.end) : "", note: s.note || "" }; armed = null; renderSessions(); return; }
+  if (a === "slot") { if (!busy) recordClass({ subjectId: b.dataset.subject, status: b.dataset.st, period: b.dataset.period, hours: 2 }, $("todoMsg"), "slot"); return; }
+  if (a === "offday") { const d = today(); D.offDays = isOff(d) ? D.offDays.filter(x => x !== d) : [...D.offDays, d]; save(); render(); toast(isOff(d) ? "今日を休みの日にしました" : "休みを取り消しました"); return; }
+  if (a === "sess-new") { const n = Date.now(); editing = "new"; draft = { start: toLocalInput(n - 3600000), end: toLocalInput(n), note: "" }; setTab("punch"); renderSessions(); return; }
+  if (a === "sess-edit") { const s = D.sessions.find(x => x.id === id); if (!s) return; editing = id; draft = { start: toLocalInput(s.start), end: s.end ? toLocalInput(s.end) : "", note: s.note || "" }; armed = null; renderSessions(); return; }
   if (a === "sess-cancel") { editing = null; draft = null; renderSessions(); return; }
   if (a === "sess-del") { if (armed !== "s:" + id) return arm("s:" + id); armed = null; editing = null; D.sessions = D.sessions.filter(s => s.id !== id); save(); render(); toast("削除しました"); return; }
   if (a === "log-del") { if (armed !== "l:" + id) return arm("l:" + id); armed = null; D.logs = D.logs.filter(l => l.id !== id); save(); render(); toast("削除しました"); return; }
-  if (a === "sub-del") { if (armed !== "u:" + id) return arm("u:" + id); armed = null; D.subjects = D.subjects.filter(s => s.id !== id); save(); render(); toast("科目を削除しました"); return; }
+  if (a === "sub-del") { if (armed !== "u:" + id) return arm("u:" + id); armed = null; D.subjects = D.subjects.filter(s => s.id !== id); for (const k in D.tt) if (D.tt[k] === id) delete D.tt[k]; save(); render(); toast("科目を削除しました"); return; }
+  if (a === "pay") { if (armed !== "pay:" + id) return arm("pay:" + id); armed = null; const m = D.penalty.menu.find(x => x.id === id); if (m) { D.penalty.paid.push({ id: rid(), ts: Date.now(), name: m.name, cost: m.cost }); save(); render(); toast(`「${m.name}」を実行して ${m.cost}点 清算しました`); } return; }
+  if (a === "menu-del") { if (armed !== "menu:" + id) return arm("menu:" + id); armed = null; D.penalty.menu = D.penalty.menu.filter(m => m.id !== id); save(); render(); return; }
+  if (a === "preset") return applyPreset();
   if (a === "place-here") return placeHere(b.dataset.key);
   if (a === "csv-robo" || a === "csv-class") return exportCsv(a.slice(4));
-  if (a === "backup") { download(`勤怠バックアップ_${ymd(new Date()).replace(/-/g,"")}.json`, JSON.stringify(D, null, 1), "application/json"); return; }
+  if (a === "backup") { download(`勤怠バックアップ_${today().replace(/-/g,"")}.json`, JSON.stringify(D, null, 1), "application/json"); return; }
   if (a === "wipe") { if (armed !== "wipe") return arm("wipe"); armed = null; D = blank(); save(); render(); toast("すべての記録を消しました"); return; }
 });
 document.addEventListener("input", e => {
-  const t = e.target;
-  if (draft && ["eStart","eEnd","eNote"].includes(t.id)) draft[{ eStart:"start", eEnd:"end", eNote:"note" }[t.id]] = t.value;
-  if (t.id === "punchNote") punchDraft = t.value;
-  if (["rDen","rLate","rOff"].includes(t.id)) ruleDirty = true;
-  if (t.id === "gAcc") accDirty = true;
-  if (t.id && t.id.startsWith("pr-")) placeDraft[t.id.slice(3)] = { radius: t.value };
+  const t = e.target, id = t.id || "";
+  if (draft && ["eStart","eEnd","eNote"].includes(id)) draft[{ eStart:"start", eEnd:"end", eNote:"note" }[id]] = t.value;
+  if (id === "punchNote") punchDraft = t.value;
+  if (["rDen","rLate","rOff"].includes(id)) dirty.rule = true;
+  if (id === "gAcc") dirty.acc = true;
+  if (id === "gGrace") dirty.grace = true;
+  if (id === "rStart" || id === "rEnd" || id === "rGoal" || id.startsWith("rd-")) dirty.robo = true;
+  if (id === "pOn" || id === "pSince" || id === "pTh" || id.startsWith("pp-")) dirty.pen = true;
+  if (id.startsWith("pr-")) placeDraft[id.slice(3)] = { radius: t.value };
 });
 document.addEventListener("change", e => {
-  if (e.target.name === "cst") { $("classMsg").hidden = true; renderClass(); }
-  if (e.target.id === "restoreFile") {
-    const f = e.target.files[0]; if (!f) return;
+  const t = e.target;
+  if (t.name === "cst") { $("classMsg").hidden = true; renderClass(); }
+  if (t.id === "cPeriod") t.dataset.touched = "1";
+  if (t.dataset.tt) { if (t.value) D.tt[t.dataset.tt] = t.value; else delete D.tt[t.dataset.tt]; save(); render(); toast("時間割を保存しました"); }
+  if (t.dataset.pt) { const [i, j] = t.dataset.pt.split("-").map(Number); if (t.value) { D.cfg.periods[i][j] = t.value; save(); render(); } }
+  if (t.id === "restoreFile") {
+    const f = t.files[0]; if (!f) return;
     f.text().then(txt => {
       const x = JSON.parse(txt);
       if (!x || !Array.isArray(x.sessions) || !Array.isArray(x.logs)) throw 0;
-      D = { ...blank(), ...x, places:{ ...blank().places, ...(x.places||{}) }, cfg:{ ...CFG_DEF, ...(x.cfg||{}) } };
-      save(); render(); toast("バックアップから戻しました");
+      D = normalize(x); save(); render(); toast("バックアップから戻しました");
     }).catch(() => toast("このファイルは読み込めませんでした。書き出したバックアップ（.json）を選んでください"));
-    e.target.value = "";
+    t.value = "";
   }
 });
 document.addEventListener("submit", e => {
@@ -659,35 +916,69 @@ document.addEventListener("submit", e => {
     const start = fromLocalInput(draft.start), end = fromLocalInput(draft.end);
     if (!start) return toast("入室時刻を入力してください");
     if (end && end <= start) return toast("退室時刻は入室時刻より後にしてください");
+    const others = D.sessions.filter(s => !s.end && s.id !== editing).length;
+    if (!end && others) return toast("作業中の記録がすでにあります。退室時刻を入れてください");
     if (editing === "new") D.sessions.push({ id: rid(), start, end: end || null, note: draft.note.trim(), inGeo: null, outGeo: null });
     else { const s = D.sessions.find(x => x.id === editing); if (s) { if (s.start !== start || (s.end || null) !== (end || null)) s.edited = true; Object.assign(s, { start, end: end || null, note: draft.note.trim() }); } }
-    if (D.sessions.filter(s => !s.end).length > 1) { toast("作業中の記録が2つになります。どちらかに退室時刻を入れてください"); return; }
     save(); editing = null; draft = null; render(); toast("保存しました"); return;
   }
-  if (f.dataset.form === "place") {
-    const k = f.dataset.key; D.places[k].radius = Math.max(20, Math.min(2000, +$("pr-" + k).value || 100)); delete placeDraft[k]; save(); render(); toast("半径を保存しました"); return;
+  if (f.dataset.form === "place") { const k = f.dataset.key; D.places[k].radius = Math.max(20, Math.min(2000, +$("pr-" + k).value || 100)); delete placeDraft[k]; save(); render(); toast("半径を保存しました"); return; }
+  if (f.id === "classForm") {
+    const subjectId = $("cSubj").value; if (!subjectId) return toast("先に設定タブで科目を登録してください");
+    if (busy) return;
+    recordClass({ subjectId, status: curStatus(), period: $("cPeriod").value, date: $("cDate").value, hours: $("cHours").value, note: $("cNote").value.trim() }, $("classMsg"), "class")
+      .then(ok => { if (ok) $("cNote").value = ""; });
+    return;
   }
-  if (f.id === "classForm") return doClass(f);
-  if (f.id === "geoForm") { D.cfg.maxAcc = Math.max(10, Math.min(500, +$("gAcc").value || 100)); accDirty = false; save(); render(); toast("保存しました"); return; }
-  if (f.id === "subForm") {
-    const name = $("sName").value.trim(); if (!name) return;
-    D.subjects.push({ id: rid(), name, hours: Math.max(1, +$("sHours").value || 60) }); save(); $("sName").value = ""; render(); toast(`${name} を追加しました`); return;
+  if (f.id === "geoForm") { D.cfg.maxAcc = Math.max(10, Math.min(500, +$("gAcc").value || 100)); dirty.acc = false; save(); render(); toast("保存しました"); return; }
+  if (f.id === "graceForm") { D.cfg.grace = Math.max(0, Math.min(90, +$("gGrace").value || 0)); dirty.grace = false; save(); render(); toast("保存しました"); return; }
+  if (f.id === "subForm") { const name = $("sName").value.trim(); if (!name) return; D.subjects.push({ id: rid(), name, hours: Math.max(1, +$("sHours").value || 60) }); save(); $("sName").value = ""; render(); toast(`${name} を追加しました。時間割にも入れてください`); return; }
+  if (f.id === "roboForm") {
+    D.cfg.roboDays = [...document.querySelectorAll("#roboDays input:checked")].map(x => +x.value);
+    D.cfg.roboStart = $("rStart").value || "18:00"; D.cfg.roboEnd = $("rEnd").value || "20:00"; D.cfg.weekGoal = Math.max(0, +$("rGoal").value || 0);
+    dirty.robo = false; save(); render(); toast("保存しました"); return;
   }
-  if (f.id === "ruleForm") {
-    Object.assign(D.cfg, { limitDen: Math.max(2, Math.min(10, +$("rDen").value || 3)), lateUnit: Math.max(1, Math.min(10, +$("rLate").value || 3)), officialCounts: $("rOff").checked });
-    ruleDirty = false; save(); render(); toast("ルールを保存しました");
+  if (f.id === "ruleForm") { Object.assign(D.cfg, { limitDen: Math.max(2, Math.min(10, +$("rDen").value || 3)), lateUnit: Math.max(1, Math.min(10, +$("rLate").value || 3)), officialCounts: $("rOff").checked }); dirty.rule = false; save(); render(); toast("ルールを保存しました"); return; }
+  if (f.id === "menuForm") { const name = $("mName").value.trim(); if (!name) return; D.penalty.menu.push({ id: rid(), name, cost: Math.max(1, Math.min(100, +$("mCost").value || 3)) }); $("mName").value = ""; save(); render(); toast("罰メニューに追加しました"); return; }
+  if (f.id === "penForm") {
+    const P = D.penalty; P.on = $("pOn").checked; P.since = $("pSince").value || today(); P.threshold = Math.max(1, Math.min(100, +$("pTh").value || 10));
+    for (const [k] of PEN_TYPES) { const v = $("pp-" + k); if (v) P.pts[k] = Math.max(-20, Math.min(20, Math.round(+v.value || 0))); }
+    dirty.pen = false; save(); render(); toast("罰のルールを保存しました");
   }
 });
 
+/* ---------- 時間割の読み込み（月〜金）---------- */
+const PRESET = [
+  [1,1,"応用プログラミングⅠ",30],[1,2,"電気工学基礎",30],[1,3,"CプログラミングⅡ",30],
+  [2,2,"Communicative English B",30],[2,3,"情報システム工学実験Ⅱ",60],[2,4,"情報システム工学実験Ⅱ",60],[2,5,"微分方程式",30],
+  [3,4,"科学史",30],
+  [4,2,"基礎ロボット工学",30],[4,3,"線形代数Ⅱ",30],[4,4,"確率統計",30],[4,5,"心理学",30],
+  [5,1,"日本語実践",30],[5,2,"情報システム工学概論",30],[5,4,"システム制御工学Ⅰ",30]
+];
+function applyPreset() {
+  let added = 0;
+  for (const [wd, p, name, hours] of PRESET) {
+    let s = D.subjects.find(x => x.name === name);
+    if (!s) { s = { id: rid(), name, hours }; D.subjects.push(s); added++; }
+    D.tt[`${wd}-${p}`] = s.id;
+  }
+  save(); render();
+  toast(`時間割を読み込みました（${added}科目を追加）`);
+}
+
 /* ---------- 起動 ---------- */
 load();
-$("cDate").value = ymd(new Date());
+if (D.cfg.periods[0] && D.cfg.periods[0][0] === "08:50") { D.cfg.periods = JSON.parse(JSON.stringify(CFG_DEF.periods)); save(); }
+if (D.cfg.roboStart === "16:30") { Object.assign(D.cfg, { roboDays:[1,4,5], roboStart:"18:00", roboEnd:"20:00", weekGoal:6 }); save(); }
+if (!D.subjects.length && !Object.keys(D.tt).length) applyPreset();
+$("cDate").value = today();
 let t0 = "punch"; try { t0 = sessionStorage.getItem("kintai.tab") || "punch"; } catch {}
 if (Object.values(D.places).some(p => p.lat == null)) t0 = "set";
 setTab(t0);
 render();
 setInterval(tick, 1000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
+setInterval(() => { if (!busy && !editing && !document.hidden) { renderTodo(penaltyState()); } }, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) render(); });
 })();
 </script>
 </body>
