@@ -134,7 +134,7 @@ input[type=text],input[type=number],input[type=date],input[type=time],input[type
 .empty{color:var(--muted);font-size:.9rem;padding:6px 0}
 
 .bars{display:flex;flex-direction:column;gap:8px}
-.bar{display:grid;grid-template-columns:64px 1fr 60px;gap:10px;align-items:center}
+.bar{display:grid;grid-template-columns:78px 1fr 56px;gap:10px;align-items:center}
 .bar .n{font-size:.88rem;font-family:var(--f-mono)}
 .bar .n.today{font-weight:600;color:var(--accent)}
 .bar .track{height:12px;background:var(--sunk);border-radius:6px;overflow:hidden;border:1px solid var(--line);display:flex}
@@ -411,7 +411,7 @@ const PEN_TYPES = [
   ["clean",  "1週間ノーミス（ボーナス）", -2]
 ];
 const today = () => ymd(new Date());
-function penDef() { return { on:true, since: today(), threshold:10, pts: Object.fromEntries(PEN_TYPES.map(t => [t[0], t[2]])),
+function penDef() { return { on:true, since: ymd(new Date(addDays(Date.now(), 1))), threshold:10, pts: Object.fromEntries(PEN_TYPES.map(t => [t[0], t[2]])),
   menu:[{ id:"p1", name:"腕立て伏せ50回", cost:3 },{ id:"p2", name:"部室の掃除", cost:3 },{ id:"p3", name:"スマホゲーム1日禁止", cost:5 },{ id:"p4", name:"おやつ・ジュース1週間禁止", cost:8 }], paid:[] }; }
 
 /* ---------- 保存 ---------- */
@@ -421,8 +421,8 @@ function normalize(x) {
   const p = { ...b.penalty, ...(x.penalty || {}) }; p.pts = { ...b.penalty.pts, ...((x.penalty || {}).pts || {}) };
   return { ...b, ...x, v:2, places:{ ...b.places, ...(x.places || {}) }, cfg:{ ...b.cfg, ...(x.cfg || {}) }, tt: x.tt || {}, offDays: x.offDays || [], penalty: p };
 }
-let D = blank(), storageOk = true;
-function load() { try { const raw = localStorage.getItem(KEY); if (raw) D = normalize(JSON.parse(raw)); } catch { storageOk = false; } }
+let D = null, storageOk = true;
+function load() { D = blank(); try { const raw = localStorage.getItem(KEY); if (raw) D = normalize(JSON.parse(raw)); } catch { storageOk = false; } }
 function save() { try { localStorage.setItem(KEY, JSON.stringify(D)); } catch { storageOk = false; toast("保存できませんでした。プライベートモードでは記録が残りません"); } }
 
 /* ---------- 小物 ---------- */
@@ -471,7 +471,6 @@ async function checkAt(key) {
   const { latitude:lat, longitude:lon, accuracy } = pos.coords;
   const acc = Math.round(accuracy), dist = Math.round(distM(p.lat, p.lon, lat, lon));
   const geo = { place:key, lat:+lat.toFixed(6), lon:+lon.toFixed(6), acc, dist, at:Date.now() };
-  if (Date.now() - pos.timestamp > 120000) throw { msg:"古い位置情報が返されました。もう一度試してください" };
   if (acc > D.cfg.maxAcc) throw { msg:`GPSの誤差が大きすぎます（±${acc}m、上限${D.cfg.maxAcc}m）。屋外か窓際でもう一度試してください`, geo };
   if (dist > p.radius) throw { msg:`${p.name}から${dist}m離れています（許容 ${p.radius}m 以内）`, geo };
   return geo;
@@ -610,8 +609,8 @@ function renderTodo(ps) {
     else done.push(`今週の目標 ${goal} 時間 達成`);
   }
   for (const s of D.subjects) { const t = tally(s); if (t.lv === "crit" || t.lv === "over") items.push({ lv:"crit", t:`${esc(s.name)} の欠課が${t.lv === "over" ? "上限を超えています" : "上限に近いです"}`, s:`欠課 ${t.total} / 上限 ${t.limit} 単位時間。もう休めません` }); }
-  $("todo").innerHTML = (off ? `<div class="it info"><span></span><div class="tx"><b>今日は休みの日に設定されています</b><span>授業と活動日の催促・罰はありません</span></div></div>` : "")
-    + items.map(i => `<div class="it ${i.lv}"><span></span><div class="tx"><b>${i.t}</b><span>${i.s}</span>${i.acts ? `<div class="btnrow">${i.acts}</div>` : ""}</div></div>`).join("")
+  $("todo").innerHTML = (off ? `<div class="it info"><div class="tx"><b>今日は休みの日に設定されています</b><span>授業と活動日の催促・罰はありません</span></div></div>` : "")
+    + items.map(i => `<div class="it ${i.lv}"><div class="tx"><b>${i.t}</b><span>${i.s}</span>${i.acts ? `<div class="btnrow">${i.acts}</div>` : ""}</div></div>`).join("")
     + (!items.length && !off ? `<p class="empty">今やることはありません</p>` : "")
     + (done.length ? `<div class="done">${done.map(x => `<span>✓ ${x}</span>`).join("")}</div>` : "");
 }
@@ -978,7 +977,7 @@ setTab(t0);
 render();
 setInterval(tick, 1000);
 setInterval(() => { if (!busy && !editing && !document.hidden) { renderTodo(penaltyState()); } }, 60000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) render(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) { punchMsg = null; $("todoMsg").hidden = true; $("classMsg").hidden = true; render(); } });
 })();
 </script>
 </body>
