@@ -48,7 +48,7 @@ button,input,select{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 .top{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap}
-.clock{text-align:right}
+.clock{text-align:right;margin-left:auto}
 .clock .t{font-family:var(--f-mono);font-size:1.5rem;font-weight:500;font-variant-numeric:tabular-nums;line-height:1.1}
 .clock .d{color:var(--muted);font-size:.82rem}
 
@@ -188,6 +188,22 @@ table.tt td{padding:4px}
 table.tt select{min-height:36px;padding:4px 6px;font-size:.82rem}
 table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:88px}
 
+.thumb{width:44px;height:44px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:pointer;background:var(--sunk);display:inline-block;vertical-align:middle}
+.thumbs{display:flex;gap:6px}
+/* カメラは常に暗い画面（意図的に単一テーマ） */
+.cam{position:fixed;inset:0;background:#000;z-index:20;display:flex;flex-direction:column}
+.cam video{flex:1;min-height:0;width:100%;object-fit:cover;background:#000}
+.cam video.mirror{transform:scaleX(-1)}
+.cam .ttl{position:absolute;top:calc(14px + env(safe-area-inset-top,0px));left:16px;right:16px;color:#fff;font-weight:700;text-align:center;text-shadow:0 1px 3px #000;font-size:1.05rem}
+.cam .ttl small{display:block;font-weight:400;font-size:.8rem;opacity:.85}
+.cam .bar{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;padding:18px 16px calc(22px + env(safe-area-inset-bottom,0px));background:#000}
+.cam .side{color:#fff;background:transparent;border:1px solid rgba(255,255,255,.45);border-radius:8px;padding:8px 12px;min-height:40px;font-weight:700;justify-self:center}
+.shutter{width:74px;height:74px;border-radius:50%;border:4px solid #fff;background:#fff;box-shadow:inset 0 0 0 4px #000;cursor:pointer}
+.shutter:active{transform:scale(.94)}
+.shutter:disabled{opacity:.5}
+.lightbox{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:21;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px}
+.lightbox img{max-width:100%;max-height:80vh;border-radius:8px}
+.lightbox button{color:#fff;background:transparent;border:1px solid rgba(255,255,255,.5);border-radius:8px;padding:8px 18px;font-weight:700}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:8px;font-size:.9rem;max-width:calc(100% - 32px);z-index:5}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -328,6 +344,7 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
       <div class="grid2" id="places"></div>
       <form class="form" id="geoForm">
         <div class="field narrow" style="flex-basis:200px"><label for="gAcc">GPS精度の上限（m）</label><input type="number" id="gAcc" min="10" max="500" required></div>
+        <label class="check" style="flex-basis:100%"><input type="checkbox" id="gPhoto"> 打刻のときに写真の撮影を必須にする（その場のカメラのみ・アルバム不可）</label>
         <button class="btn" type="submit">保存</button>
       </form>
       <p class="muted small">誤差がこれより大きいときは打刻できません。校舎の中で通りにくい場合は 100〜150 にしてください。</p>
@@ -384,6 +401,16 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
     </div>
   </section>
 </div>
+<div class="cam" id="cam" hidden>
+  <video id="camVideo" playsinline muted autoplay></video>
+  <div class="ttl"><span id="camTitle"></span><small id="camSub"></small></div>
+  <div class="bar">
+    <button class="side" type="button" id="camCancel">やめる</button>
+    <button class="shutter" type="button" id="camShot" aria-label="撮影する"></button>
+    <button class="side" type="button" id="camFlip">カメラ切替</button>
+  </div>
+</div>
+<div class="lightbox" id="lightbox" hidden><img id="lbImg" alt="打刻の写真"><button type="button" data-act="lb-close">閉じる</button></div>
 <div class="toast" id="toast" hidden></div>
 <a id="dl" hidden></a>
 
@@ -395,8 +422,9 @@ const KEY = "kintai.v1";
 const WD = ["日","月","火","水","木","金","土"];
 const ST = { present:["出席","ok"], late:["遅刻","warn"], early:["早退","warn"], absent:["欠席","crit"], official:["公欠","info"], cancel:["休講","off"] };
 const ONSITE = ["present","late","early"];
-const PLACE_DEF = { school:{ name:"学校", lat:null, lon:null, radius:300 }, lab:{ name:"作業場", lat:null, lon:null, radius:100 } };
-const CFG_DEF = { maxAcc:100, limitDen:3, lateUnit:3, officialCounts:false, grace:15,
+const FIT = { lat:33.695446, lon:130.4395 };   // 福岡工業大学（福岡市東区和白東3-30-1）
+const PLACE_DEF = { school:{ name:"福岡工業大学", lat:FIT.lat, lon:FIT.lon, radius:400, preset:true, fit:true }, lab:{ name:"作業場", lat:FIT.lat, lon:FIT.lon, radius:400, preset:true } };
+const CFG_DEF = { maxAcc:100, photo:true, camFacing:"user", limitDen:3, lateUnit:3, officialCounts:false, grace:15,
   periods:[["09:00","10:30"],["10:40","12:10"],["13:00","14:30"],["14:40","16:10"],["16:20","17:50"]],
   roboDays:[1,4,5], roboStart:"18:00", roboEnd:"20:00", weekGoal:6 };
 const PEN_TYPES = [
@@ -561,13 +589,14 @@ const LV = { ok:["余裕あり","ok"], warn:["注意","warn"], crit:["危険","c
 /* ---------- 描画 ---------- */
 function render() {
   const ps = penaltyState();
-  renderNotes(ps); renderTodo(ps); renderPunch(); renderWeek(); renderSessions(); renderClass(); renderPen(ps); renderSummary(); renderSettings(); tick();
+  renderNotes(ps); renderTodo(ps); renderPunch(); renderWeek(); renderSessions(); renderClass(); renderPen(ps); renderSummary(); renderSettings(); tick(); fillPhotos();
 }
 function renderNotes(ps) {
   $("secureNote").hidden = !!(window.isSecureContext && navigator.geolocation);
   const miss = Object.values(D.places).filter(p => p.lat == null).map(p => p.name);
   const msgs = [];
   if (miss.length) msgs.push(`まず設定タブで「${miss.join("」「")}」の場所を登録してください。`);
+  else if (D.places.lab.preset) msgs.push("作業場は大学の中心で仮登録中です。作業場に着いたら、設定タブで「いまの場所を登録」を押してください。");
   if (!D.subjects.length) msgs.push("設定タブで科目と時間割を登録すると、授業の催促が始まります。");
   if (!storageOk) msgs.push("このブラウザでは記録を保存できません（プライベートモードなど）。");
   $("setupNote").hidden = !msgs.length; $("setupNote").textContent = msgs.join(" ");
@@ -578,6 +607,8 @@ function renderNotes(ps) {
 }
 function renderTodo(ps) {
   const d = today(), now = Date.now(), items = [], done = [];
+  const penOn = D.penalty.on && d >= (D.penalty.since || d);
+  const penTxt = (k, when) => penOn && +D.penalty.pts[k] ? `${when}罰ポイント +${D.penalty.pts[k]}` : `記録しておきましょう${D.penalty.on && !penOn ? `（罰は ${mdStr(D.penalty.since)} から）` : ""}`;
   const off = isOff(d);
   $("offBtn").textContent = off ? "休みを取り消す" : "今日は休み（祝日・行事）";
   if (ps.due) items.push({ lv:"crit", t:`罰の執行待ち（${ps.bal}点）`, s:"罰タブでメニューから1つ実行して清算してください", acts:`<button class="btn sm danger" data-tab="pen">罰タブへ</button>` });
@@ -591,13 +622,13 @@ function renderTodo(ps) {
       const p = s.period, a = `data-period="${p}" data-subject="${s.subjectId}"`;
       if (now < s.start - 15*60000) { items.push({ lv:"", t:`${name}`, s:`${hm(s.start)} 開始` }); continue; }
       if (now < s.start + D.cfg.grace*60000) items.push({ lv:"info", t:`${name} の出席を打刻`, s:`${hm(s.start)} 開始。学校の中で押してください`, acts:`<button class="btn sm primary" data-act="slot" data-st="present" ${a} ${busy ? "disabled" : ""}>出席を打刻</button>` });
-      else items.push({ lv: now > s.end ? "crit" : "warn", t:`${name} がまだ記録されていません`, s:`今日中に記録しないと罰ポイント +${D.penalty.pts.miss || 0}`,
+      else items.push({ lv: now > s.end ? "crit" : "warn", t:`${name} がまだ記録されていません`, s: penTxt("miss", "今日中に記録しないと"),
         acts:`${now < s.end ? `<button class="btn sm primary" data-act="slot" data-st="late" ${a} ${busy ? "disabled" : ""}>遅刻で打刻</button>` : ""}<button class="btn sm" data-act="slot" data-st="absent" ${a}>欠席</button><button class="btn sm" data-act="slot" data-st="official" ${a}>公欠</button><button class="btn sm" data-act="slot" data-st="cancel" ${a}>休講</button>` });
     }
     const wd = new Date().getDay();
     if (D.cfg.roboDays.includes(wd) && !D.sessions.some(s => ymd(new Date(s.start)) === d)) {
       const st = at(d, D.cfg.roboStart);
-      if (now >= st) items.push({ lv:"warn", t:"今日は活動日です。作業場に入室していません", s:`${D.cfg.roboStart} 開始。今日中に入室しないと罰ポイント +${D.penalty.pts.noshow || 0}` });
+      if (now >= st) items.push({ lv:"warn", t:"今日は活動日です。作業場に入室していません", s:`${D.cfg.roboStart} 開始。${penOn ? penTxt("noshow", "今日中に入室しないと") : "入室を打刻しましょう"}` });
       else items.push({ lv:"", t:"ロボコン活動", s:`${D.cfg.roboStart}〜${D.cfg.roboEnd || ""}` });
     }
   }
@@ -618,7 +649,7 @@ function renderPunch() {
   const o = openSess(), lab = D.places.lab;
   const todayMs = D.sessions.reduce((a, s) => a + overlap(s, dayStart(), dayStart() + 864e5), 0);
   let msg = "";
-  if (pendingOut) msg = `<div class="gpsmsg crit">${esc(pendingOut.msg)}<div class="btnrow" style="margin-top:8px"><button class="btn sm danger" data-act="force-out">位置未確認として退室（罰 +${D.penalty.on ? D.penalty.pts.unverified || 0 : 0}）</button><button class="btn sm" data-act="cancel-out">やめる</button></div></div>`;
+  if (pendingOut) msg = `<div class="gpsmsg crit">${esc(pendingOut.msg)}<div class="btnrow" style="margin-top:8px"><button class="btn sm danger" data-act="force-out">位置未確認として退室${D.penalty.on && today() >= D.penalty.since && +D.penalty.pts.unverified ? `（罰 +${D.penalty.pts.unverified}）` : ""}</button><button class="btn sm" data-act="cancel-out">やめる</button></div></div>`;
   else if (punchMsg) msg = `<div class="gpsmsg ${punchMsg.cls}">${esc(punchMsg.text)}</div>`;
   $("punch").innerHTML = `<div class="punch">
     <div>
@@ -629,7 +660,7 @@ function renderPunch() {
     </div>
     <div class="side">
       <input type="text" id="punchNote" maxlength="80" placeholder="作業メモ（任意）例：足回りの配線" value="${esc(punchDraft ?? (o ? o.note || "" : ""))}" aria-label="作業メモ">
-      <button class="btn big ${o ? "out" : "primary"}" data-act="punch" ${busy ? "disabled" : ""}>${busy === "punch" ? "位置を確認中…" : o ? "退室する" : "入室する"}</button>
+      <button class="btn big ${o ? "out" : "primary"}" data-act="punch" ${busy ? "disabled" : ""}>${busy === "punch" ? "位置を確認中…" : busy === "photo" ? "撮影中…" : o ? (D.cfg.photo ? "写真＋GPSで退室" : "退室する") : (D.cfg.photo ? "写真＋GPSで入室" : "入室する")}</button>
       ${msg}
     </div>
   </div>`;
@@ -672,13 +703,14 @@ function renderSessions() {
     const long = !s.end && Date.now() - s.start > 14*3600000;
     return `<div class="row">
       <span class="date">${md(s.start)}</span>
-      <div class="main"><span class="mono">${hm(s.start)} → ${s.end ? hm(s.end) : "作業中"}</span>${s.end ? `<span class="muted mono small">${dur(s.end - s.start)}</span>` : long ? `<span class="pill crit">退室し忘れ？</span>` : ""}${sessBadges(s)}</div>
+      <div class="main">${s.inPhoto || s.outPhoto ? `<span class="thumbs">${thumb(s.inPhoto, "入室")}${thumb(s.outPhoto, "退室")}</span>` : ""}<span class="mono">${hm(s.start)} → ${s.end ? hm(s.end) : "作業中"}</span>${s.end ? `<span class="muted mono small">${dur(s.end - s.start)}</span>` : long ? `<span class="pill crit">退室し忘れ？</span>` : ""}${sessBadges(s)}</div>
       <div><button class="btn link sm" data-act="sess-edit" data-id="${s.id}">編集</button></div>
       ${s.note ? `<div class="note">${esc(s.note)}</div>` : ""}
       ${editing === s.id ? sessEditor(s) : ""}
     </div>`;
   }).join("");
   $("sessions").innerHTML = html || `<p class="empty">まだ記録がありません。作業場で「入室する」を押すとここに残ります</p>`;
+  fillPhotos();
 }
 function curStatus() { const c = document.querySelector('input[name="cst"]:checked'); return c ? c.value : "present"; }
 function renderClass() {
@@ -691,9 +723,9 @@ function renderClass() {
   const st = curStatus(), onsite = ONSITE.includes(st);
   $("cDateWrap").hidden = onsite;
   $("cHoursWrap").hidden = !(st === "absent" || st === "official");
-  $("cSubmit").textContent = busy === "class" ? "位置を確認中…" : onsite ? "位置を確認して記録" : "記録する";
+  $("cSubmit").textContent = busy === "class" ? "位置を確認中…" : busy === "photo" ? "撮影中…" : onsite ? (D.cfg.photo ? "写真＋GPSで記録" : "位置を確認して記録") : "記録する";
   $("cSubmit").disabled = !!busy;
-  $("classHint").textContent = onsite ? `出席・遅刻・早退は、${D.places.school.name}の中にいるときに今の時刻で記録します。` : st === "cancel" ? "休講は欠課にも罰にもなりません。" : "欠席・公欠は位置確認なしで、日付を選んで記録できます。";
+  $("classHint").textContent = onsite ? `出席・遅刻・早退は、${D.places.school.name}の中にいるときに今の時刻で記録します。${D.cfg.photo ? "その場で写真を1枚撮る必要があります。" : ""}` : st === "cancel" ? "休講は欠課にも罰にもなりません。" : "欠席・公欠は位置確認なしで、日付を選んで記録できます。";
   const c = D.cfg;
   $("ruleText").textContent = `上限 年間時数の1/${c.limitDen}・遅刻早退${c.lateUnit}回で1時間・公欠は${c.officialCounts ? "含める" : "含めない"}`;
   $("subjects").innerHTML = D.subjects.length ? D.subjects.map(s => {
@@ -710,7 +742,7 @@ function renderClass() {
     const [lab, cls] = ST[l.status] || ["?","off"];
     const badge = ONSITE.includes(l.status) ? (l.geo ? `<span class="pill ok" title="${geoText(l.geo)}">位置確認済み</span>` : `<span class="pill off">手動</span>`) : "";
     return `<div class="row"><span class="date">${mdStr(l.date)}</span>
-      <div class="main">${l.period ? `<span class="mono small muted">${l.period}限</span>` : ""}<b>${esc(subjName(l.subjectId))}</b><span class="pill ${cls}">${lab}</span>${l.ts && ONSITE.includes(l.status) ? `<span class="mono small muted">${hm(l.ts)}</span>` : ""}${l.status === "absent" || l.status === "official" ? `<span class="mono small">${l.hours}時間</span>` : ""}${badge}</div>
+      <div class="main">${thumb(l.photo, "授業")}${l.period ? `<span class="mono small muted">${l.period}限</span>` : ""}<b>${esc(subjName(l.subjectId))}</b><span class="pill ${cls}">${lab}</span>${l.ts && ONSITE.includes(l.status) ? `<span class="mono small muted">${hm(l.ts)}</span>` : ""}${l.status === "absent" || l.status === "official" ? `<span class="mono small">${l.hours}時間</span>` : ""}${badge}</div>
       <div>${delBtn("l:" + l.id, "log-del", l.id)}</div>
       ${l.note ? `<div class="note">${esc(l.note)}</div>` : ""}</div>`;
   }).join("") : `<p class="empty">まだ記録がありません</p>`;
@@ -761,8 +793,9 @@ function renderSettings() {
   $("places").innerHTML = Object.entries(D.places).map(([k, p]) => {
     const d = placeDraft[k] || {};
     return `<div class="place">
-      <div class="h"><b>${esc(p.name)}</b>${p.lat != null ? `<span class="pill ok">登録済み</span>` : `<span class="pill crit">未登録</span>`}</div>
-      <div class="mono small muted">${p.lat != null ? `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` : "緯度・経度なし"}${p.acc ? `（登録時の誤差±${p.acc}m）` : ""}</div>
+      <div class="h"><b>${esc(p.name)}</b>${p.lat == null ? `<span class="pill crit">未登録</span>` : p.preset && k === "lab" ? `<span class="pill warn">仮登録</span>` : `<span class="pill ok">登録済み</span>`}</div>
+      <div class="mono small muted">${p.lat != null ? `${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` : "緯度・経度なし"}${p.acc && !p.preset ? `（登録時の誤差±${p.acc}m）` : ""}</div>
+      ${p.preset ? `<p class="small muted">${k === "lab" ? "建物がわからないので、大学の中心で仮に登録しています。作業場の中で「いまの場所を登録」を押すと、半径100mの厳しい判定になります。" : "福岡工業大学（和白東3-30-1）の中心から半径400mで判定します。"}</p>` : ""}
       <form class="form" data-form="place" data-key="${k}">
         <div class="field narrow"><label for="pr-${k}">半径（m）</label><input type="number" id="pr-${k}" min="20" max="2000" value="${d.radius ?? p.radius}"></div>
         <button class="btn sm" type="submit">半径を保存</button>
@@ -771,7 +804,7 @@ function renderSettings() {
       ${p.lat != null ? `<a class="btn sm" style="text-decoration:none;display:inline-flex;align-items:center" href="https://www.google.com/maps?q=${p.lat},${p.lon}" target="_blank" rel="noopener">地図で確認</a>` : ""}</div>
     </div>`;
   }).join("");
-  if (!dirty.acc) $("gAcc").value = D.cfg.maxAcc;
+  if (!dirty.acc) { $("gAcc").value = D.cfg.maxAcc; $("gPhoto").checked = !!D.cfg.photo; }
   if (!dirty.grace) $("gGrace").value = D.cfg.grace;
   $("subList").innerHTML = D.subjects.length ? D.subjects.map(s => `<div class="row"><span class="date">${s.hours}時間</span><div class="main"><b>${esc(s.name)}</b><span class="muted small">上限${Math.floor(s.hours / Math.max(1, D.cfg.limitDen))}時間</span></div><div>${delBtn("u:" + s.id, "sub-del", s.id)}</div></div>`).join("")
     : `<p class="empty">まだ科目がありません</p>`;
@@ -800,17 +833,113 @@ function setTab(t) {
 }
 
 /* ---------- 操作 ---------- */
+/* ---------- 写真 ---------- */
+const idb = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => {
+    const r = indexedDB.open("kintai-photos", 1);
+    r.onupgradeneeded = () => r.result.createObjectStore("p");
+    r.onsuccess = () => res(r.result); r.onerror = () => { dbp = null; rej(r.error); };
+  }));
+  const tx = (mode, fn) => open().then(db => new Promise((res, rej) => {
+    const t = db.transaction("p", mode), req = fn(t.objectStore("p"));
+    t.oncomplete = () => res(req ? req.result : undefined); t.onerror = () => rej(t.error); t.onabort = () => rej(t.error);
+  }));
+  return { put: (k, v) => tx("readwrite", st => st.put(v, k)), get: k => tx("readonly", st => st.get(k)), del: k => tx("readwrite", st => st.delete(k)),
+    keys: () => tx("readonly", st => st.getAllKeys()), clear: () => tx("readwrite", st => st.clear()) };
+})();
+const photoCache = new Map();
+async function savePhoto(dataUrl) {
+  if (!dataUrl) return null;
+  const id = "ph" + rid();
+  try { await idb.put(id, dataUrl); photoCache.set(id, dataUrl); return id; }
+  catch { toast("写真を端末に保存できませんでした（記録は残しました）"); return null; }
+}
+function dropPhotos(...ids) { for (const id of ids) if (id) { photoCache.delete(id); idb.del(id).catch(() => {}); } }
+const thumb = (id, label) => id ? `<img class="thumb" data-photo="${id}" data-act="photo" alt="${label}の写真">` : "";
+function fillPhotos() {
+  document.querySelectorAll("img[data-photo]").forEach(img => {
+    if (img.getAttribute("src")) return;
+    const id = img.dataset.photo;
+    if (photoCache.has(id)) { img.src = photoCache.get(id); return; }
+    idb.get(id).then(v => { if (v) { photoCache.set(id, v); img.src = v; } else img.alt = "写真なし"; }).catch(() => {});
+  });
+}
+let camStream = null;
+function stopCam() { if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; } const v = $("camVideo"); v.srcObject = null; }
+/* その場のカメラで1枚撮る（アルバム不可）。カメラを開くと同時にGPS確認を始め、
+   撮影日時・場所からの距離・誤差・緯度経度を写真に焼き込む。返り値 { photo, geo, err } */
+function takePhoto(label, placeKey) {
+  return new Promise((resolve, reject) => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return reject({ msg:"この開き方ではカメラが使えません。https のURLで開いてください" });
+    const box = $("cam"), v = $("camVideo"), shot = $("camShot"), place = D.places[placeKey];
+    if (place.lat == null) return reject({ msg:`設定タブで「${place.name}」の場所を登録してください` });
+    let closed = false, geoAt = 0, geoP = null;
+    const sub = t => { if (!closed) $("camSub").textContent = t; };
+    const fetchGeo = () => {
+      geoAt = Date.now(); sub("位置を確認中…");
+      const p = geoP = checkAt(placeKey).then(g => ({ geo: g }), e => ({ err: e }));
+      p.then(r => { if (p === geoP) sub(r.geo ? `✓ ${place.name}から${r.geo.dist}m・誤差±${r.geo.acc}m` : `✗ ${r.err.msg}`); });
+    };
+    const finish = (fn, val) => { closed = true; stopCam(); box.hidden = true; shot.disabled = false; shot.onclick = $("camFlip").onclick = $("camCancel").onclick = null; fn(val); };
+    const start = async () => {
+      stopCam();
+      const facing = D.cfg.camFacing || "user";
+      camStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode: facing, width:{ ideal:1280 }, height:{ ideal:1280 } }, audio:false });
+      v.classList.toggle("mirror", facing === "user");
+      v.srcObject = camStream; await v.play().catch(() => {});
+    };
+    $("camTitle").textContent = label;
+    box.hidden = false; shot.disabled = false;
+    fetchGeo();
+    start().catch(e => finish(reject, { msg: e && e.name === "NotAllowedError" ? "カメラの利用が許可されていません。ブラウザの設定でこのサイトにカメラを許可してください" : "カメラを起動できませんでした。ブラウザの設定でこのサイトにカメラが許可されているか確認してください" }));
+    $("camFlip").onclick = () => { D.cfg.camFacing = (D.cfg.camFacing || "user") === "user" ? "environment" : "user"; save(); start().catch(() => toast("カメラを切り替えられませんでした")); };
+    $("camCancel").onclick = () => finish(reject, { msg:"写真を撮らなかったので記録していません", cancel:true });
+    shot.onclick = async () => {
+      const w = v.videoWidth, h = v.videoHeight;
+      if (!w || !h) return toast("カメラの準備中です。少し待ってから押してください");
+      const shotAt = new Date();
+      const k = Math.min(1, 720 / Math.max(w, h)), c = document.createElement("canvas");
+      c.width = Math.round(w * k); c.height = Math.round(h * k);
+      const g = c.getContext("2d");
+      g.drawImage(v, 0, 0, c.width, c.height);
+      shot.disabled = true; v.pause();
+      if (Date.now() - geoAt > 60000) fetchGeo();
+      const r = await geoP;
+      if (closed) return;
+      const bh = Math.max(46, Math.round(c.height * 0.13)), fs = Math.round(bh * 0.27), x = Math.round(bh * 0.22), mw = c.width - x * 2;
+      g.fillStyle = "rgba(0,0,0,.62)"; g.fillRect(0, c.height - bh, c.width, bh);
+      g.textBaseline = "middle"; g.font = `${fs}px sans-serif`;
+      g.fillStyle = "#fff";
+      g.fillText(`${ymd(shotAt).replace(/-/g, "/")} ${hm(shotAt.getTime())}:${pad(shotAt.getSeconds())}  ${label}`, x, c.height - bh * 0.7, mw);
+      const gg = r.geo || (r.err && r.err.geo);
+      g.fillStyle = r.geo ? "#7CF0B0" : "#FF9C92";
+      g.fillText(gg ? `${r.geo ? "✓" : "✗"} ${place.name}から${gg.dist}m・誤差±${gg.acc}m  ${gg.lat.toFixed(5)}, ${gg.lon.toFixed(5)}` : `✗ 位置を確認できませんでした`, x, c.height - bh * 0.3, mw);
+      finish(resolve, { photo: c.toDataURL("image/jpeg", 0.72), geo: r.geo || null, err: r.err || null });
+    };
+  });
+}
+
 async function doPunch() {
   if (busy) return;
   const o = openSess(), note = ($("punchNote") || {}).value || "";
-  busy = "punch"; punchMsg = null; pendingOut = null; render();
+  punchMsg = null; pendingOut = null;
+  let photo = null, geo = null, err = null;
+  if (D.cfg.photo) {
+    busy = "photo"; render();
+    try { ({ photo, geo, err } = await takePhoto(o ? "ロボコン 退室" : "ロボコン 入室", "lab")); }
+    catch (e) { busy = false; punchMsg = { cls:"crit", text: e.msg }; render(); return; }
+  }
+  busy = "punch"; render();
   try {
-    const geo = await checkAt("lab");
-    if (o) { Object.assign(o, { end: Date.now(), outGeo: geo, note: note.trim() }); punchMsg = { cls:"ok", text:`退室しました（${geoText(geo)}）` }; }
-    else { D.sessions.push({ id: rid(), start: Date.now(), end: null, note: note.trim(), inGeo: geo, outGeo: null }); punchMsg = { cls:"ok", text:`入室しました（${geoText(geo)}）` }; }
+    if (!D.cfg.photo) geo = await checkAt("lab");
+    if (err) throw err;
+    const pid = await savePhoto(photo);
+    if (o) { Object.assign(o, { end: Date.now(), outGeo: geo, outPhoto: pid, note: note.trim() }); punchMsg = { cls:"ok", text:`退室しました（${geoText(geo)}）` }; }
+    else { D.sessions.push({ id: rid(), start: Date.now(), end: null, note: note.trim(), inGeo: geo, outGeo: null, inPhoto: pid }); punchMsg = { cls:"ok", text:`入室しました（${geoText(geo)}）` }; }
     save(); punchDraft = null;
   } catch (e) {
-    if (o) pendingOut = { msg: e.msg, geo: e.geo || null, note };
+    if (o) pendingOut = { msg: e.msg, geo: e.geo || null, note, photo };
     else punchMsg = { cls:"crit", text: e.msg + "　入室は記録していません。" };
   }
   busy = false; render();
@@ -820,8 +949,15 @@ async function recordClass({ subjectId, status, period, date, hours, note }, msg
   const onsite = ONSITE.includes(status);
   const rec = { id: rid(), subjectId, status, period: period ? +period : null, hours: status === "absent" || status === "official" ? Math.max(1, Math.min(12, +hours || 2)) : 0, note: note || "", ts: Date.now(), date: date || today(), geo: null };
   if (onsite) {
-    busy = busyKey; msgEl.hidden = true; render();
-    try { rec.geo = await checkAt("school"); rec.date = today(); }
+    msgEl.hidden = true;
+    let photo = null, geo = null, err = null;
+    if (D.cfg.photo) {
+      busy = "photo"; render();
+      try { ({ photo, geo, err } = await takePhoto(`${rec.period ? rec.period + "限 " : ""}${subjName(subjectId)} ${ST[status][0]}`, "school")); }
+      catch (e) { busy = false; msgEl.hidden = false; msgEl.className = "gpsmsg crit"; msgEl.textContent = e.msg; render(); return false; }
+    }
+    busy = busyKey; render();
+    try { if (!D.cfg.photo) geo = await checkAt("school"); if (err) throw err; rec.geo = geo; rec.date = today(); rec.ts = Date.now(); rec.photo = await savePhoto(photo); }
     catch (e) { busy = false; msgEl.hidden = false; msgEl.className = "gpsmsg crit"; msgEl.textContent = e.msg + "　記録していません。"; render(); return false; }
     busy = false;
   }
@@ -835,7 +971,8 @@ async function placeHere(key) {
   busy = "place-" + key; render();
   try {
     const pos = await getPos(), p = D.places[key];
-    Object.assign(p, { lat: pos.coords.latitude, lon: pos.coords.longitude, acc: Math.round(pos.coords.accuracy) });
+    Object.assign(p, { lat: pos.coords.latitude, lon: pos.coords.longitude, acc: Math.round(pos.coords.accuracy), preset: false });
+    if (key === "lab" && p.radius > 150) p.radius = 100;
     save();
     toast(p.acc > 50 ? `登録しましたが誤差が±${p.acc}mあります。屋外でもう一度登録すると正確になります` : `${p.name}を登録しました（誤差±${p.acc}m）`);
   } catch (e) { toast(e.msg); }
@@ -863,30 +1000,39 @@ document.addEventListener("click", e => {
   if (b.dataset.tab) { setTab(b.dataset.tab); return; }
   const a = b.dataset.act, id = b.dataset.id;
   if (a === "punch") return doPunch();
-  if (a === "force-out") { const o = openSess(); if (o && pendingOut) { Object.assign(o, { end: Date.now(), outGeo: null, outTry: pendingOut.geo, note: (pendingOut.note || "").trim() }); save(); punchMsg = { cls:"", text:"位置未確認として退室を記録しました" }; } pendingOut = null; punchDraft = null; render(); return; }
+  if (a === "force-out") { const o = openSess(), po = pendingOut; pendingOut = null; if (o && po) { savePhoto(po.photo).then(pid => { Object.assign(o, { end: Date.now(), outGeo: null, outTry: po.geo, outPhoto: pid, note: (po.note || "").trim() }); save(); punchMsg = { cls:"", text:"位置未確認として退室を記録しました" }; punchDraft = null; render(); }); } else render(); return; }
+  if (a === "photo") { const src = b.getAttribute("src"); if (src) { $("lbImg").src = src; $("lightbox").hidden = false; } return; }
+  if (a === "lb-close") { $("lightbox").hidden = true; $("lbImg").removeAttribute("src"); return; }
   if (a === "cancel-out") { pendingOut = null; render(); return; }
   if (a === "slot") { if (!busy) recordClass({ subjectId: b.dataset.subject, status: b.dataset.st, period: b.dataset.period, hours: 2 }, $("todoMsg"), "slot"); return; }
   if (a === "offday") { const d = today(); D.offDays = isOff(d) ? D.offDays.filter(x => x !== d) : [...D.offDays, d]; save(); render(); toast(isOff(d) ? "今日を休みの日にしました" : "休みを取り消しました"); return; }
   if (a === "sess-new") { const n = Date.now(); editing = "new"; draft = { start: toLocalInput(n - 3600000), end: toLocalInput(n), note: "" }; setTab("punch"); renderSessions(); return; }
   if (a === "sess-edit") { const s = D.sessions.find(x => x.id === id); if (!s) return; editing = id; draft = { start: toLocalInput(s.start), end: s.end ? toLocalInput(s.end) : "", note: s.note || "" }; armed = null; renderSessions(); return; }
-  if (a === "sess-cancel") { editing = null; draft = null; renderSessions(); return; }
-  if (a === "sess-del") { if (armed !== "s:" + id) return arm("s:" + id); armed = null; editing = null; D.sessions = D.sessions.filter(s => s.id !== id); save(); render(); toast("削除しました"); return; }
-  if (a === "log-del") { if (armed !== "l:" + id) return arm("l:" + id); armed = null; D.logs = D.logs.filter(l => l.id !== id); save(); render(); toast("削除しました"); return; }
+  if (a === "sess-cancel") { editing = null; draft = null; renderSessions(); fillPhotos(); return; }
+  if (a === "sess-del") { if (armed !== "s:" + id) return arm("s:" + id); armed = null; editing = null; { const s0 = D.sessions.find(s => s.id === id); if (s0) dropPhotos(s0.inPhoto, s0.outPhoto); } D.sessions = D.sessions.filter(s => s.id !== id); save(); render(); toast("削除しました"); return; }
+  if (a === "log-del") { if (armed !== "l:" + id) return arm("l:" + id); armed = null; { const l0 = D.logs.find(l => l.id === id); if (l0) dropPhotos(l0.photo); } D.logs = D.logs.filter(l => l.id !== id); save(); render(); toast("削除しました"); return; }
   if (a === "sub-del") { if (armed !== "u:" + id) return arm("u:" + id); armed = null; D.subjects = D.subjects.filter(s => s.id !== id); for (const k in D.tt) if (D.tt[k] === id) delete D.tt[k]; save(); render(); toast("科目を削除しました"); return; }
   if (a === "pay") { if (armed !== "pay:" + id) return arm("pay:" + id); armed = null; const m = D.penalty.menu.find(x => x.id === id); if (m) { D.penalty.paid.push({ id: rid(), ts: Date.now(), name: m.name, cost: m.cost }); save(); render(); toast(`「${m.name}」を実行して ${m.cost}点 清算しました`); } return; }
   if (a === "menu-del") { if (armed !== "menu:" + id) return arm("menu:" + id); armed = null; D.penalty.menu = D.penalty.menu.filter(m => m.id !== id); save(); render(); return; }
   if (a === "preset") return applyPreset();
   if (a === "place-here") return placeHere(b.dataset.key);
   if (a === "csv-robo" || a === "csv-class") return exportCsv(a.slice(4));
-  if (a === "backup") { download(`勤怠バックアップ_${today().replace(/-/g,"")}.json`, JSON.stringify(D, null, 1), "application/json"); return; }
-  if (a === "wipe") { if (armed !== "wipe") return arm("wipe"); armed = null; D = blank(); save(); render(); toast("すべての記録を消しました"); return; }
+  if (a === "backup") {
+    const ids = [...D.sessions.flatMap(s => [s.inPhoto, s.outPhoto]), ...D.logs.map(l => l.photo)].filter(Boolean);
+    Promise.all(ids.map(id => idb.get(id).then(v => [id, v]).catch(() => [id, null]))).then(pairs => {
+      const photos = Object.fromEntries(pairs.filter(p => p[1]));
+      download(`勤怠バックアップ_${today().replace(/-/g,"")}.json`, JSON.stringify({ ...D, photos }), "application/json");
+    });
+    return;
+  }
+  if (a === "wipe") { if (armed !== "wipe") return arm("wipe"); armed = null; D = blank(); save(); photoCache.clear(); idb.clear().catch(() => {}); render(); toast("すべての記録を消しました"); return; }
 });
 document.addEventListener("input", e => {
   const t = e.target, id = t.id || "";
   if (draft && ["eStart","eEnd","eNote"].includes(id)) draft[{ eStart:"start", eEnd:"end", eNote:"note" }[id]] = t.value;
   if (id === "punchNote") punchDraft = t.value;
   if (["rDen","rLate","rOff"].includes(id)) dirty.rule = true;
-  if (id === "gAcc") dirty.acc = true;
+  if (id === "gAcc" || id === "gPhoto") dirty.acc = true;
   if (id === "gGrace") dirty.grace = true;
   if (id === "rStart" || id === "rEnd" || id === "rGoal" || id.startsWith("rd-")) dirty.robo = true;
   if (id === "pOn" || id === "pSince" || id === "pTh" || id.startsWith("pp-")) dirty.pen = true;
@@ -903,7 +1049,10 @@ document.addEventListener("change", e => {
     f.text().then(txt => {
       const x = JSON.parse(txt);
       if (!x || !Array.isArray(x.sessions) || !Array.isArray(x.logs)) throw 0;
-      D = normalize(x); save(); render(); toast("バックアップから戻しました");
+      const photos = x.photos || {}; delete x.photos;
+      D = normalize(x); save();
+      Promise.all(Object.entries(photos).map(([k, v]) => idb.put(k, v).catch(() => {}))).then(() => { photoCache.clear(); render(); });
+      toast("バックアップから戻しました");
     }).catch(() => toast("このファイルは読み込めませんでした。書き出したバックアップ（.json）を選んでください"));
     t.value = "";
   }
@@ -929,7 +1078,7 @@ document.addEventListener("submit", e => {
       .then(ok => { if (ok) $("cNote").value = ""; });
     return;
   }
-  if (f.id === "geoForm") { D.cfg.maxAcc = Math.max(10, Math.min(500, +$("gAcc").value || 100)); dirty.acc = false; save(); render(); toast("保存しました"); return; }
+  if (f.id === "geoForm") { D.cfg.maxAcc = Math.max(10, Math.min(500, +$("gAcc").value || 100)); D.cfg.photo = $("gPhoto").checked; dirty.acc = false; save(); render(); toast("保存しました"); return; }
   if (f.id === "graceForm") { D.cfg.grace = Math.max(0, Math.min(90, +$("gGrace").value || 0)); dirty.grace = false; save(); render(); toast("保存しました"); return; }
   if (f.id === "subForm") { const name = $("sName").value.trim(); if (!name) return; D.subjects.push({ id: rid(), name, hours: Math.max(1, +$("sHours").value || 60) }); save(); $("sName").value = ""; render(); toast(`${name} を追加しました。時間割にも入れてください`); return; }
   if (f.id === "roboForm") {
@@ -968,6 +1117,7 @@ function applyPreset() {
 /* ---------- 起動 ---------- */
 load();
 if (D.cfg.periods[0] && D.cfg.periods[0][0] === "08:50") { D.cfg.periods = JSON.parse(JSON.stringify(CFG_DEF.periods)); save(); }
+if (!D.places.school.fit) { D.places.school = JSON.parse(JSON.stringify(PLACE_DEF.school)); if (D.places.lab.lat == null) D.places.lab = JSON.parse(JSON.stringify(PLACE_DEF.lab)); save(); }
 if (D.cfg.roboStart === "16:30") { Object.assign(D.cfg, { roboDays:[1,4,5], roboStart:"18:00", roboEnd:"20:00", weekGoal:6 }); save(); }
 if (!D.subjects.length && !Object.keys(D.tt).length) applyPreset();
 $("cDate").value = today();
