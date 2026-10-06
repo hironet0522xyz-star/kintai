@@ -401,7 +401,7 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
     </div>
     <div class="box" id="syncBox">
       <div class="box-head"><h2>Claude連携</h2><span id="syncPill"></span></div>
-      <p class="muted small">記録をGitHubの非公開リポジトリに保存し、毎日7時ごろと21時ごろにClaudeが読んでアドバイスを書きます。アドバイスはアプリを開くと「打刻」タブの一番上に出ます。写真と緯度・経度は送りません（距離と誤差だけ送ります）。</p>
+      <p class="muted small">記録をGitHubの非公開リポジトリに保存し、毎晩21時ごろにClaudeが読んでアドバイスを書きます。アドバイスはアプリを開くと「打刻」タブの一番上に出ます（連携しなくても、アプリ自身の分析はいつでも出ます）。写真と緯度・経度は送りません（距離と誤差だけ送ります）。</p>
       <form class="form" id="syncForm">
         <div class="field" style="flex-basis:100%"><label for="syRepo">保存先（ユーザー名/リポジトリ名）</label><input type="text" id="syRepo" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
         <div class="field" style="flex-basis:100%"><label for="syToken">アクセス用の鍵（トークン）</label><input type="password" id="syToken" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_ で始まる文字列"></div>
@@ -613,7 +613,7 @@ const LV = { ok:["余裕あり","ok"], warn:["注意","warn"], crit:["危険","c
 /* ---------- 描画 ---------- */
 function render() {
   const ps = penaltyState();
-  renderNotes(ps); renderTodo(ps); renderPunch(); renderWeek(); renderSessions(); renderClass(); renderPen(ps); renderSummary(); renderSettings(); tick(); fillPhotos();
+  renderNotes(ps); renderTodo(ps); renderAdvice(); renderPunch(); renderWeek(); renderSessions(); renderClass(); renderPen(ps); renderSummary(); renderSettings(); tick(); fillPhotos();
 }
 function renderNotes(ps) {
   $("secureNote").hidden = !!(window.isSecureContext && navigator.geolocation);
@@ -1040,6 +1040,7 @@ document.addEventListener("click", e => {
   if (a === "pay") { if (armed !== "pay:" + id) return arm("pay:" + id); armed = null; const m = D.penalty.menu.find(x => x.id === id); if (m) { D.penalty.paid.push({ id: rid(), ts: Date.now(), name: m.name, cost: m.cost }); save(); render(); toast(`「${m.name}」を実行して ${m.cost}点 清算しました`); } return; }
   if (a === "menu-del") { if (armed !== "menu:" + id) return arm("menu:" + id); armed = null; D.penalty.menu = D.penalty.menu.filter(m => m.id !== id); save(); render(); return; }
   if (a === "preset") return applyPreset();
+  if (a === "advice-toggle") { const ca = SY.advice, fresh = ca && Date.now() - (Date.parse(ca.generatedAt) || 0) < 14 * 3600000; const cur = adviceView || (fresh ? "claude" : "app"); adviceView = cur === "claude" ? "app" : "claude"; renderAdvice(); return; }
   if (a === "sync-now") { SY.err = ""; pushRecords(true).then(fetchAdvice); return; }
   if (a === "sync-off") { if (armed !== "syncoff") return arm("syncoff"); armed = null; Object.assign(SY, { token:"", sha:null, lastHash:"", lastPush:0, advice:null, err:"" }); saveSync(); $("syToken").value = ""; renderSync(); renderAdvice(); toast("Claude連携を解除しました"); return; }
   if (a === "place-here") return placeHere(b.dataset.key);
@@ -1188,6 +1189,7 @@ function exportPayload() {
     classLogs: D.logs.slice(-500).map(l => ({ date: l.date, period: l.period, subject: subjName(l.subjectId), status: ST[l.status][0], hours: l.hours || 0, geo: stripGeo(l.geo), photo: !!l.photo, note: l.note || "" })),
     offDays: D.offDays.slice(-60)
   };
+  const la = localAdvice(); summary.appAdvice = { headline: la.headline, items: la.items.map(x => x.text), plan: la.plan };
   return { app: "kintai", schema: 1, timezone: "Asia/Tokyo", summary, data };
 }
 async function pushRecords(force) {
@@ -1224,20 +1226,81 @@ function agoText(iso) {
   const d = dayStart(t), td = dayStart();
   return `${d === td ? "今日" : d === addDays(td, -1) ? "昨日" : md(t)} ${hm(t)}`;
 }
+/* アプリ自身が作るアドバイス（トークン消費なし・その場の状況から計算） */
+function localAdvice() {
+  const now = Date.now(), d = today(), ps = penaltyState(), P = D.penalty, items = [];
+  const penOn = P.on && d >= (P.since || d);
+  const add = (level, text) => items.push({ level, text });
+  let plan = "", bad = false, warn = false;
+  if (penOn && ps.due) { add("crit", `罰の執行待ち：${ps.bal}点（基準${P.threshold}点）。罰タブで1つ実行して清算`); bad = true; plan = "罰タブで罰メニューを1つ実行する"; }
+  const o = openSess();
+  if (o && now - o.start > 14 * 3600000) { add("crit", `${md(o.start)} ${hm(o.start)}から退室していない。記録を直す`); bad = true; }
+  else if (o && now > at(ymd(new Date(o.start)), D.cfg.roboEnd || "20:00")) { add("warn", `活動終了の${D.cfg.roboEnd}を過ぎた。帰る前に作業場で退室を打刻`); warn = true; plan = plan || "作業場で「退室」を打刻する"; }
+  const off = isOff(d), slots = off ? [] : slotsOn(d);
+  const missed = slots.filter(s => !logFor(d, s) && now > s.start + D.cfg.grace * 60000);
+  if (missed.length) { add("crit", `${missed.map(s => `${s.period}限 ${subjName(s.subjectId)}`).join("、")}が未記録。今日中に記録しないと1コマ+${P.pts.miss || 0}点`); bad = true; plan = plan || `${missed[0].period}限の記録を入れる（教室にいるなら打刻）`; }
+  const next = slots.find(s => !logFor(d, s) && now <= s.start + D.cfg.grace * 60000);
+  if (next) plan = plan || `${hm(next.start)} ${next.period}限 ${subjName(next.subjectId)}。開始${D.cfg.grace}分以内に写真＋GPSで打刻`;
+  const roboToday = !off && D.cfg.roboDays.includes(new Date().getDay()), wentToday = D.sessions.some(x => ymd(new Date(x.start)) === d);
+  if (roboToday && !wentToday && now >= at(d, D.cfg.roboStart)) {
+    const over = now >= at(d, D.cfg.roboEnd || "20:00");
+    add(over ? "crit" : "warn", over ? `今日は活動日なのに作業場に行っていない（+${P.pts.noshow || 0}点）` : `今日は活動日。${D.cfg.roboStart}を過ぎたのにまだ入室していない`);
+    if (over) bad = true; else { warn = true; plan = plan || "作業場に行って「入室」を打刻する"; }
+  }
+  const risky = D.subjects.map(s => ({ s, t: tally(s) })).filter(x => x.t.lv !== "ok").sort((a, b) => b.t.ratio - a.t.ratio);
+  for (const { s, t } of risky.slice(0, 2)) {
+    if (t.lv === "over") { add("crit", `${s.name}は欠課${t.total}時間で上限${t.limit}を超えた。担当の先生に相談を`); bad = true; }
+    else { add(t.lv === "crit" ? "crit" : "warn", `${s.name}は欠課${t.total}/${t.limit}。あと${t.left}時間（${Math.floor(t.left / 2)}コマ）しか休めない`); if (t.lv === "crit") bad = true; else warn = true; }
+  }
+  const goal = +D.cfg.weekGoal || 0;
+  if (goal > 0) {
+    const ws = weekStart(), h = D.sessions.reduce((a, s) => a + overlap(s, ws, addDays(ws, 7)), 0), left = goal - h / 3600000;
+    const [sh, sm] = (D.cfg.roboStart || "18:00").split(":").map(Number), [eh, em] = (D.cfg.roboEnd || "20:00").split(":").map(Number);
+    const perDay = Math.max(0.5, (eh * 60 + em - sh * 60 - sm) / 60);
+    let daysLeft = 0;
+    for (let t = dayStart(); t < addDays(ws, 7); t = addDays(t, 1)) { const ds = ymd(new Date(t)); if (D.cfg.roboDays.includes(new Date(t).getDay()) && !isOff(ds) && (t > dayStart() || now < at(ds, D.cfg.roboEnd || "20:00"))) daysLeft++; }
+    const exempt = penOn ? ws < parseD(P.since).getTime() : true;
+    if (left <= 0) add("ok", `今週のロボコンは${hrs(h)}時間で目標${goal}時間を達成`);
+    else if (left > daysLeft * perDay + 0.01) { add(exempt ? "info" : "warn", `今週の目標まであと${left.toFixed(1)}時間。${daysLeft ? `残りの活動日${daysLeft}日では届かない。延長か休日に作業を` : "今週の活動日はもう終わった"}${exempt ? "（今週分は罰の対象外）" : ""}`); if (!exempt) warn = true; }
+    else add("info", `今週の目標まであと${left.toFixed(1)}時間（残りの活動日${daysLeft}日）`);
+    if (!plan && daysLeft && D.cfg.roboDays.includes(new Date().getDay()) && !o && now < at(d, D.cfg.roboEnd || "20:00")) plan = `${D.cfg.roboStart}に作業場で入室を打刻`;
+  }
+  if (penOn && !ps.due) {
+    let streak = 0;
+    const evDays = new Set(ps.ev.filter(e => e.pts > 0).map(e => e.date));
+    for (let t = addDays(dayStart(), -1); ymd(new Date(t)) >= P.since && streak < 60; t = addDays(t, -1)) { if (evDays.has(ymd(new Date(t)))) break; streak++; }
+    add(ps.bal > P.threshold * 0.6 ? "warn" : "ok", `罰ポイント${ps.bal}点。基準${P.threshold}点まであと${P.threshold - ps.bal}点${streak >= 2 ? `・${streak}日連続ノーミス` : ""}`);
+  }
+  if (!plan) {
+    const tm = ymd(new Date(addDays(dayStart(), 1))), ts = isOff(tm) ? [] : slotsOn(tm);
+    plan = ts.length ? `明日は${hm(ts[0].start)}の${ts[0].period}限 ${subjName(ts[0].subjectId)}から。開始時に打刻` : "今日の予定は終わり。明日の準備をする";
+  }
+  const mood = bad ? "bad" : warn ? "warn" : "good";
+  const crit = items.find(x => x.level === "crit"), w = items.find(x => x.level === "warn");
+  const allDone = slots.length && slots.every(s => logFor(d, s));
+  const headline = crit ? (missed.length ? "記録漏れがある。今日中に取り返す" : ps.due && penOn ? "罰の執行が先。今日中に清算する" : roboToday && !wentToday && now >= at(d, D.cfg.roboEnd || "20:00") ? "今日の活動をさぼった。次は必ず行く" : "放っておくと危ない項目がある")
+    : w ? (w.text.includes("活動日") ? "作業場に行く時間だ" : allDone ? "授業は全部記録済み。あとはロボコンの時間" : "今のペースだと足りない。手を打とう")
+    : allDone ? "今日の授業は全部記録できている" : "順調。このまま続ける";
+  return { mood, headline, items: items.slice(0, 5), plan, generatedAt: new Date().toISOString(), source: "app" };
+}
+let adviceView = null;   // "app" | "claude"（null は自動）
 function renderAdvice() {
   const el = $("adviceCard");
-  if (!SY.token) { el.hidden = true; return; }
-  el.hidden = false;
-  const a = SY.advice;
-  if (!a) { el.className = "advice"; el.innerHTML = `<div class="who">CLAUDEからのアドバイス</div><p class="muted small">連携できています。最初のアドバイスは、次の自動チェック（毎日7時ごろ・21時ごろ）のあとに届きます。</p>`; return; }
+  const ca = SY.token && SY.advice ? SY.advice : null;
+  const caFresh = ca && Date.now() - (Date.parse(ca.generatedAt) || 0) < 14 * 3600000;
+  const view = adviceView || (caFresh ? "claude" : "app");
+  const a = view === "claude" && ca ? ca : localAdvice();
+  const isClaude = a === ca;
   const mood = ["good","warn","bad"].includes(a.mood) ? a.mood : "";
   const lvl = { crit:["要対応","crit"], warn:["注意","warn"], ok:["よし","ok"], info:["メモ","info"] };
-  const old = Date.now() - (Date.parse(a.generatedAt) || 0) > 36 * 3600000;
+  el.hidden = false;
   el.className = "advice " + mood;
-  el.innerHTML = `<div class="hd"><div class="who">CLAUDEからのアドバイス</div><span class="muted small mono">${esc(agoText(a.generatedAt))}${old ? "（古いアドバイス）" : ""}</span></div>
+  el.innerHTML = `<div class="hd"><div class="who">${isClaude ? "CLAUDEからのアドバイス" : "アプリの分析"}</div>
+      <span class="muted small mono">${isClaude ? esc(agoText(a.generatedAt)) : "いまの状況"}</span></div>
     ${a.headline ? `<div class="head">${esc(a.headline)}</div>` : ""}
     ${Array.isArray(a.items) && a.items.length ? `<ul>${a.items.slice(0, 6).map(it => { const [l, c] = lvl[it.level] || lvl.info; return `<li><span class="pill ${c}">${l}</span><span>${esc(it.text)}</span></li>`; }).join("")}</ul>` : ""}
-    ${a.plan ? `<div class="plan"><b>次にやること</b>　${esc(a.plan)}</div>` : ""}`;
+    ${a.plan ? `<div class="plan"><b>次にやること</b>　${esc(a.plan)}</div>` : ""}
+    ${ca ? `<div class="btnrow"><button class="btn link sm" data-act="advice-toggle">${isClaude ? "アプリの分析（いまの状況）を見る" : `Claudeのアドバイス（${esc(agoText(ca.generatedAt))}）を見る`}</button></div>` : ""}`;
 }
 function renderSync() {
   const st = $("syncStatus"), on = !!SY.token;
@@ -1265,7 +1328,7 @@ $("syRepo").value = SY.repo; $("syToken").value = SY.token;
 renderSync(); renderAdvice();
 if (SY.token) { pushRecords(false); fetchAdvice(); }
 setInterval(tick, 1000);
-setInterval(() => { if (!busy && !editing && !document.hidden) { renderTodo(penaltyState()); } }, 60000);
+setInterval(() => { if (!busy && !editing && !document.hidden) { renderTodo(penaltyState()); renderAdvice(); } }, 60000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) { punchMsg = null; $("todoMsg").hidden = true; $("classMsg").hidden = true; render(); if (SY.token) { pushRecords(false); if (Date.now() - SY.adviceAt > 120000) fetchAdvice(); } } });
 })();
 </script>
