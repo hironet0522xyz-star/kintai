@@ -55,6 +55,15 @@ button,input,select{font:inherit;color:inherit}
 .notice{border-radius:var(--r);padding:10px 14px;font-size:.88rem;background:var(--warn-soft)}
 .notice.crit{background:var(--crit-soft)}
 .notice b{color:var(--ink)}
+.advice{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.advice.bad{border-color:var(--crit);background:linear-gradient(var(--crit-soft),var(--crit-soft)) top/100% 4px no-repeat,var(--surface)}
+.advice.warn{border-color:var(--warn);background:linear-gradient(var(--warn-soft),var(--warn-soft)) top/100% 4px no-repeat,var(--surface)}
+.advice .hd{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.advice .who{display:flex;align-items:center;gap:8px;font-size:.78rem;color:var(--muted);font-weight:700;letter-spacing:.06em}
+.advice .head{font-size:1.05rem;font-weight:700;line-height:1.5}
+.advice ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+.advice li{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:baseline;font-size:.92rem}
+.advice .plan{background:var(--sunk);border-radius:8px;padding:8px 12px;font-size:.88rem}
 .penban{background:var(--crit);color:var(--surface);border-radius:var(--r);padding:12px 14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;font-weight:700}
 .penban .btn{background:var(--surface);color:var(--crit);border-color:var(--surface)}
 
@@ -232,6 +241,7 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
 
   <!-- 打刻 -->
   <section class="panel" id="p-punch" role="tabpanel">
+    <div id="adviceCard" hidden></div>
     <div class="box">
       <div class="box-head"><h2>今日やること</h2><button class="btn link sm" data-act="offday" id="offBtn"></button></div>
       <div class="todo" id="todo"></div>
@@ -389,6 +399,20 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
         <button class="btn primary" type="submit">保存</button>
       </form>
     </div>
+    <div class="box" id="syncBox">
+      <div class="box-head"><h2>Claude連携</h2><span id="syncPill"></span></div>
+      <p class="muted small">記録をGitHubの非公開リポジトリに保存し、毎日7時ごろと21時ごろにClaudeが読んでアドバイスを書きます。アドバイスはアプリを開くと「打刻」タブの一番上に出ます。写真と緯度・経度は送りません（距離と誤差だけ送ります）。</p>
+      <form class="form" id="syncForm">
+        <div class="field" style="flex-basis:100%"><label for="syRepo">保存先（ユーザー名/リポジトリ名）</label><input type="text" id="syRepo" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+        <div class="field" style="flex-basis:100%"><label for="syToken">アクセス用の鍵（トークン）</label><input type="password" id="syToken" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_ で始まる文字列"></div>
+        <button class="btn primary" type="submit">保存して接続テスト</button>
+      </form>
+      <div class="gpsmsg" id="syncStatus" hidden></div>
+      <div class="btnrow" id="syncActs" hidden>
+        <button class="btn sm" data-act="sync-now">今すぐ同期</button>
+        <button class="btn sm danger" data-act="sync-off">連携を解除</button>
+      </div>
+    </div>
     <div class="box">
       <h2>バックアップ</h2>
       <p class="muted small">記録はこの端末のブラウザの中だけに保存されます。機種変更やブラウザのデータ消去の前に書き出してください。</p>
@@ -451,7 +475,7 @@ function normalize(x) {
 }
 let D = null, storageOk = true;
 function load() { D = blank(); try { const raw = localStorage.getItem(KEY); if (raw) D = normalize(JSON.parse(raw)); } catch { storageOk = false; } }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(D)); } catch { storageOk = false; toast("保存できませんでした。プライベートモードでは記録が残りません"); } }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(D)); } catch { storageOk = false; toast("保存できませんでした。プライベートモードでは記録が残りません"); } scheduleSync(); }
 
 /* ---------- 小物 ---------- */
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -817,6 +841,7 @@ function renderSettings() {
     $("rStart").value = D.cfg.roboStart; $("rEnd").value = D.cfg.roboEnd || "20:00"; $("rGoal").value = D.cfg.weekGoal;
   }
   if (!dirty.rule) { $("rDen").value = D.cfg.limitDen; $("rLate").value = D.cfg.lateUnit; $("rOff").checked = !!D.cfg.officialCounts; }
+  const so = document.querySelector('[data-act="sync-off"]'); if (so) { so.classList.toggle("armed", armed === "syncoff"); so.textContent = armed === "syncoff" ? "本当に解除する" : "連携を解除"; }
   const w = document.querySelector('[data-act="wipe"]'); if (w) { w.classList.toggle("armed", armed === "wipe"); w.textContent = armed === "wipe" ? "本当にすべて消す" : "すべての記録を消す"; }
 }
 function tick() {
@@ -1015,6 +1040,8 @@ document.addEventListener("click", e => {
   if (a === "pay") { if (armed !== "pay:" + id) return arm("pay:" + id); armed = null; const m = D.penalty.menu.find(x => x.id === id); if (m) { D.penalty.paid.push({ id: rid(), ts: Date.now(), name: m.name, cost: m.cost }); save(); render(); toast(`「${m.name}」を実行して ${m.cost}点 清算しました`); } return; }
   if (a === "menu-del") { if (armed !== "menu:" + id) return arm("menu:" + id); armed = null; D.penalty.menu = D.penalty.menu.filter(m => m.id !== id); save(); render(); return; }
   if (a === "preset") return applyPreset();
+  if (a === "sync-now") { SY.err = ""; pushRecords(true).then(fetchAdvice); return; }
+  if (a === "sync-off") { if (armed !== "syncoff") return arm("syncoff"); armed = null; Object.assign(SY, { token:"", sha:null, lastHash:"", lastPush:0, advice:null, err:"" }); saveSync(); $("syToken").value = ""; renderSync(); renderAdvice(); toast("Claude連携を解除しました"); return; }
   if (a === "place-here") return placeHere(b.dataset.key);
   if (a === "csv-robo" || a === "csv-class") return exportCsv(a.slice(4));
   if (a === "backup") {
@@ -1078,6 +1105,16 @@ document.addEventListener("submit", e => {
       .then(ok => { if (ok) $("cNote").value = ""; });
     return;
   }
+  if (f.id === "syncForm") {
+    const repo = $("syRepo").value.trim().replace(/^https?:\/\/github\.com\//, "").replace(/\.git$/, "").replace(/\/$/, "");
+    const token = $("syToken").value.trim();
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) return toast("保存先は「ユーザー名/リポジトリ名」の形で入れてください");
+    if (!token) return toast("鍵（トークン）を貼り付けてください");
+    if (repo !== SY.repo || token !== SY.token) Object.assign(SY, { sha:null, lastHash:"", advice:null });
+    Object.assign(SY, { repo, token, err:"" }); saveSync(); $("syRepo").value = repo;
+    pushRecords(true).then(() => { if (!SY.err) { toast("接続できました。記録を送りました"); fetchAdvice(); } });
+    return;
+  }
   if (f.id === "geoForm") { D.cfg.maxAcc = Math.max(10, Math.min(500, +$("gAcc").value || 100)); D.cfg.photo = $("gPhoto").checked; dirty.acc = false; save(); render(); toast("保存しました"); return; }
   if (f.id === "graceForm") { D.cfg.grace = Math.max(0, Math.min(90, +$("gGrace").value || 0)); dirty.grace = false; save(); render(); toast("保存しました"); return; }
   if (f.id === "subForm") { const name = $("sName").value.trim(); if (!name) return; D.subjects.push({ id: rid(), name, hours: Math.max(1, +$("sHours").value || 60) }); save(); $("sName").value = ""; render(); toast(`${name} を追加しました。時間割にも入れてください`); return; }
@@ -1114,7 +1151,106 @@ function applyPreset() {
   toast(`時間割を読み込みました（${added}科目を追加）`);
 }
 
+/* ---------- Claude連携（GitHubの非公開リポジトリと同期） ---------- */
+const SYNC_KEY = "kintai.sync";
+const SY = { token:"", repo:"hironet0522xyz-star/kintai-data", sha:null, lastHash:"", lastPush:0, advice:null, adviceAt:0, err:"" };
+let syncTimer = null, syncing = false, adviceBusy = false;
+function loadSync() { try { Object.assign(SY, JSON.parse(localStorage.getItem(SYNC_KEY) || "{}")); } catch {} }
+function saveSync() { try { localStorage.setItem(SYNC_KEY, JSON.stringify(SY)); } catch {} }
+function scheduleSync() { if (!SY.token) return; clearTimeout(syncTimer); syncTimer = setTimeout(() => pushRecords(false), 4000); }
+const ghUrl = path => `https://api.github.com/repos/${SY.repo.split("/").map(encodeURIComponent).join("/")}/contents/${path}`;
+const gh = (path, opt = {}) => fetch(ghUrl(path), { ...opt, cache:"no-store", headers:{ Authorization:`Bearer ${SY.token}`, Accept:"application/vnd.github+json", ...(opt.headers || {}) } });
+function b64(str) { const by = new TextEncoder().encode(str); let bin = ""; for (let i = 0; i < by.length; i += 0x8000) bin += String.fromCharCode.apply(null, by.subarray(i, i + 0x8000)); return btoa(bin); }
+function hashStr(str) { let h = 5381; for (let i = 0; i < str.length; i++) h = (h * 33 + str.charCodeAt(i)) >>> 0; return h.toString(36) + ":" + str.length; }
+async function errText(e) {
+  if (!e || typeof e.status !== "number") return "通信できませんでした。電波のよい場所でもう一度試してください";
+  if (e.status === 401) return "鍵（トークン）が正しくないか、期限が切れています。作り直して貼り付けてください";
+  if (e.status === 403) return "鍵（トークン）に書き込みの権限がありません。Contents を Read and write にしてください";
+  if (e.status === 404) return `保存先「${SY.repo}」が見つかりません。名前と、鍵の対象リポジトリを確認してください`;
+  return `GitHubでエラーが起きました（${e.status}）。少し待ってから試してください`;
+}
+const stripGeo = g => g ? { dist: g.dist, acc: g.acc } : null;
+function exportPayload() {
+  const ps = penaltyState(), d = today(), ws = weekStart();
+  const summary = {
+    today: d, weekday: WD[new Date().getDay()], offToday: isOff(d),
+    todayClasses: isOff(d) ? [] : slotsOn(d).map(s => { const l = logFor(d, s); return { period: s.period, subject: subjName(s.subjectId), start: hm(s.start), end: hm(s.end), recorded: l ? ST[l.status][0] : null }; }),
+    robocon: { days: D.cfg.roboDays.map(w => WD[w]), time: `${D.cfg.roboStart}-${D.cfg.roboEnd || ""}`, inLabNow: !!openSess(),
+      weekHours: +hrs(D.sessions.reduce((a, s) => a + overlap(s, ws, addDays(ws, 7)), 0)), weekGoal: +D.cfg.weekGoal || 0 },
+    penalty: { on: !!D.penalty.on, since: D.penalty.since, balance: ps.bal, threshold: D.penalty.threshold, due: ps.due,
+      recent: ps.ev.slice(0, 20).map(e => ({ date: e.date, type: penLabel(e.type), detail: e.detail, pts: e.pts })),
+      paid: ps.paid.slice(-10).map(p => ({ date: ymd(new Date(p.ts)), name: p.name, cost: p.cost })) },
+    subjects: D.subjects.map(s => { const t = tally(s); return { name: s.name, absence: t.total, limit: t.limit, left: t.left, level: LV[t.lv][0], attended: t.pres, absentHours: t.ab, lateEarly: t.late, official: t.off }; })
+  };
+  const data = {
+    periods: D.cfg.periods, timetable: Object.fromEntries(Object.entries(D.tt).map(([k, v]) => { const [w, p] = k.split("-"); return [`${WD[+w]}${p}限`, subjName(v)]; })),
+    sessions: D.sessions.slice(-300).map(s => ({ start: toLocalInput(s.start), end: s.end ? toLocalInput(s.end) : null, verified: verified(s), edited: !!s.edited, inGeo: stripGeo(s.inGeo), outGeo: stripGeo(s.outGeo), photo: !!(s.inPhoto || s.outPhoto), note: s.note || "" })),
+    classLogs: D.logs.slice(-500).map(l => ({ date: l.date, period: l.period, subject: subjName(l.subjectId), status: ST[l.status][0], hours: l.hours || 0, geo: stripGeo(l.geo), photo: !!l.photo, note: l.note || "" })),
+    offDays: D.offDays.slice(-60)
+  };
+  return { app: "kintai", schema: 1, timezone: "Asia/Tokyo", summary, data };
+}
+async function pushRecords(force) {
+  if (!SY.token || syncing) return;
+  const p = exportPayload(), h = hashStr(JSON.stringify(p));
+  if (!force && h === SY.lastHash) return;
+  syncing = true; renderSync();
+  const body = JSON.stringify({ ...p, exportedAt: new Date().toISOString() }, null, 1);
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const r = await gh("records.json", { method:"PUT", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ message:`記録を同期 ${today()} ${hm(Date.now())}`, content: b64(body), ...(SY.sha ? { sha: SY.sha } : {}) }) });
+      if (r.ok) { const j = await r.json(); SY.sha = j.content && j.content.sha; SY.lastHash = h; SY.lastPush = Date.now(); SY.err = ""; break; }
+      if ((r.status === 409 || r.status === 422) && attempt === 0) { const m = await gh("records.json"); SY.sha = m.ok ? (await m.json()).sha : null; continue; }
+      throw r;
+    }
+  } catch (e) { SY.err = await errText(e); }
+  syncing = false; saveSync(); renderSync();
+}
+async function fetchAdvice() {
+  if (!SY.token || adviceBusy) return;
+  adviceBusy = true;
+  try {
+    const r = await gh("advice.json", { headers:{ Accept:"application/vnd.github.raw+json" } });
+    if (r.status === 404) SY.advice = null;
+    else if (r.ok) { const j = JSON.parse(await r.text()); if (j && (j.headline || (j.items && j.items.length))) SY.advice = j; }
+    else throw r;
+    SY.adviceAt = Date.now();
+  } catch (e) { if (!SY.err) SY.err = await errText(e); }
+  adviceBusy = false; saveSync(); renderAdvice(); renderSync();
+}
+function agoText(iso) {
+  const t = Date.parse(iso); if (!t) return "";
+  const d = dayStart(t), td = dayStart();
+  return `${d === td ? "今日" : d === addDays(td, -1) ? "昨日" : md(t)} ${hm(t)}`;
+}
+function renderAdvice() {
+  const el = $("adviceCard");
+  if (!SY.token) { el.hidden = true; return; }
+  el.hidden = false;
+  const a = SY.advice;
+  if (!a) { el.className = "advice"; el.innerHTML = `<div class="who">CLAUDEからのアドバイス</div><p class="muted small">連携できています。最初のアドバイスは、次の自動チェック（毎日7時ごろ・21時ごろ）のあとに届きます。</p>`; return; }
+  const mood = ["good","warn","bad"].includes(a.mood) ? a.mood : "";
+  const lvl = { crit:["要対応","crit"], warn:["注意","warn"], ok:["よし","ok"], info:["メモ","info"] };
+  const old = Date.now() - (Date.parse(a.generatedAt) || 0) > 36 * 3600000;
+  el.className = "advice " + mood;
+  el.innerHTML = `<div class="hd"><div class="who">CLAUDEからのアドバイス</div><span class="muted small mono">${esc(agoText(a.generatedAt))}${old ? "（古いアドバイス）" : ""}</span></div>
+    ${a.headline ? `<div class="head">${esc(a.headline)}</div>` : ""}
+    ${Array.isArray(a.items) && a.items.length ? `<ul>${a.items.slice(0, 6).map(it => { const [l, c] = lvl[it.level] || lvl.info; return `<li><span class="pill ${c}">${l}</span><span>${esc(it.text)}</span></li>`; }).join("")}</ul>` : ""}
+    ${a.plan ? `<div class="plan"><b>次にやること</b>　${esc(a.plan)}</div>` : ""}`;
+}
+function renderSync() {
+  const st = $("syncStatus"), on = !!SY.token;
+  $("syncActs").hidden = !on;
+  $("syncPill").innerHTML = !on ? `<span class="pill off">未設定</span>` : SY.err ? `<span class="pill crit">エラー</span>` : `<span class="pill ok">連携中</span>`;
+  if (!on) { st.hidden = true; return; }
+  st.hidden = false;
+  st.className = "gpsmsg " + (SY.err ? "crit" : syncing ? "" : "ok");
+  st.textContent = syncing ? "同期しています…" : SY.err ? SY.err : `接続できています。最後に記録を送った時刻：${SY.lastPush ? agoText(new Date(SY.lastPush).toISOString()) : "まだ"}`;
+}
+
 /* ---------- 起動 ---------- */
+loadSync();
 load();
 if (D.cfg.periods[0] && D.cfg.periods[0][0] === "08:50") { D.cfg.periods = JSON.parse(JSON.stringify(CFG_DEF.periods)); save(); }
 if (!D.places.school.fit) { D.places.school = JSON.parse(JSON.stringify(PLACE_DEF.school)); if (D.places.lab.lat == null) D.places.lab = JSON.parse(JSON.stringify(PLACE_DEF.lab)); save(); }
@@ -1125,9 +1261,12 @@ let t0 = "punch"; try { t0 = sessionStorage.getItem("kintai.tab") || "punch"; } 
 if (Object.values(D.places).some(p => p.lat == null)) t0 = "set";
 setTab(t0);
 render();
+$("syRepo").value = SY.repo; $("syToken").value = SY.token;
+renderSync(); renderAdvice();
+if (SY.token) { pushRecords(false); fetchAdvice(); }
 setInterval(tick, 1000);
 setInterval(() => { if (!busy && !editing && !document.hidden) { renderTodo(penaltyState()); } }, 60000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) { punchMsg = null; $("todoMsg").hidden = true; $("classMsg").hidden = true; render(); } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) { punchMsg = null; $("todoMsg").hidden = true; $("classMsg").hidden = true; render(); if (SY.token) { pushRecords(false); if (Date.now() - SY.adviceAt > 120000) fetchAdvice(); } } });
 })();
 </script>
 </body>
