@@ -389,6 +389,7 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
       <form class="form" id="geoForm">
         <div class="field narrow" style="flex-basis:200px"><label for="gAcc">GPS精度の上限（m）</label><input type="number" id="gAcc" min="10" max="500" required></div>
         <label class="check" style="flex-basis:100%"><input type="checkbox" id="gPhoto"> 打刻のときに写真の撮影を必須にする（その場のカメラのみ・アルバム不可）</label>
+        <label class="check" style="flex-basis:100%"><input type="checkbox" id="gAuto"> 毎授業の後に課題を自動登録する（締切は2日後の23:59。その日のうちに内容を直せる）</label>
         <label class="check" style="flex-basis:100%"><input type="checkbox" id="gProof"> 課題の「提出した」に証拠の写真を必須にする（端末で簡単に確かめ、連携中は毎晩Claudeが軽く確認）</label>
         <button class="btn" type="submit">保存</button>
       </form>
@@ -495,7 +496,7 @@ const ST = { present:["出席","ok"], late:["遅刻","warn"], early:["早退","w
 const ONSITE = ["present","late","early"];
 const FIT = { lat:33.695446, lon:130.4395 };   // 福岡工業大学（福岡市東区和白東3-30-1）
 const PLACE_DEF = { school:{ name:"福岡工業大学", lat:FIT.lat, lon:FIT.lon, radius:400, preset:true, fit:true }, lab:{ name:"作業場", lat:FIT.lat, lon:FIT.lon, radius:400, preset:true } };
-const CFG_DEF = { maxAcc:100, photo:true, taskProof:true, photoKeepDays:60, camFacing:"user", limitDen:3, lateUnit:3, officialCounts:false, grace:15,
+const CFG_DEF = { maxAcc:100, photo:true, taskProof:true, autoTask:true, autoTaskDays:2, photoKeepDays:60, camFacing:"user", limitDen:3, lateUnit:3, officialCounts:false, grace:15,
   periods:[["09:00","10:30"],["10:40","12:10"],["13:00","14:30"],["14:40","16:10"],["16:20","17:50"]],
   roboDays:[1,4,5], roboStart:"18:00", roboEnd:"20:00", weekGoal:6 };
 const PEN_TYPES = [
@@ -554,8 +555,9 @@ function save(action, sys) {
  *  - 機能を変えたら APP_VERSION を上げる（更新の記録が監査ログに1行残る）。
  *  - 監査ログ（kintai.audit）の形式を変えるときも消さずに追記で移行する。長さが減るとClaudeが巻き戻しと判定する。
  */
-const APP_VERSION = "2026.10.07-fix4";
-const GOAL_VERIFIED_FROM = "2026-10-12";   // この週から、週の目標は位置確認済みの作業時間だけで数える（それより前の週には遡らない）
+const APP_VERSION = "2026.10.07-auto5";
+const GOAL_VERIFIED_FROM = "2026-10-12";
+const AUTO_TASK_FROM = "2026-10-08";        // この日の授業から、授業後に課題を自動登録する（それより前には遡らない）   // この週から、週の目標は位置確認済みの作業時間だけで数える（それより前の週には遡らない）
 const AUDIT_KEY = "kintai.audit", SEEN_KEY = "kintai.seen", DELAY_MS = 24 * 3600000, FREE_DELETE_MS = 10 * 60000;
 let A = { v:1, len:0, head:"0", ver:"", entries:[] };
 function cyrb53(str, seed = 0) {
@@ -614,7 +616,8 @@ function applyChange(c) {
   else if (c.kind === "place") Object.assign(D.places[d.key], d.val);
   else if (c.kind === "ttDel") delete D.tt[d.key];
   else if (c.kind === "menuAdd") D.penalty.menu.push(d);
-  else if (c.kind === "addLog") { if (!D.logs.some(l => sameSlot(l, d))) D.logs.push(d); }
+  else if (c.kind === "addLog") { if (!D.logs.some(l => sameSlot(l, d))) D.logs.push(d); if (d.status === "cancel") dropAutoTask(d.date, d.subjectId); }
+  else if (c.kind === "taskEdit") { const k = D.tasks.find(t => t.id === d.id); if (k) k.due = d.due; }
   else if (c.kind === "addSess") D.sessions.push(d);
   else if (c.kind === "subDel") { D.subjects = D.subjects.filter(x => x.id !== d.id); for (const k in D.tt) if (D.tt[k] === d.id) delete D.tt[k]; }
   else if (c.kind === "syncOff") { Object.assign(SY, { token:"", sha:null, lastHash:"", lastPush:0, advice:null, err:"" }); saveSync(); }
@@ -841,6 +844,11 @@ function renderTodo(ps) {
     if (left > 0) items.push({ lv: left / 3600000 > daysLeft * 3 ? "warn" : "info", t:`今週の目標まであと ${hrs(left)} 時間`, s:`目標 ${goal} 時間・今週は残り${daysLeft}日（日曜まで）` });
     else done.push(`今週の目標 ${goal} 時間 達成`);
   }
+  for (const k of D.tasks.filter(t => t.auto && !t.detailed && !t.done && !t.deleted && t.classDate === d)) {
+    const due = fromLocalInput(k.due);
+    items.push({ lv:"info", t:`${k.period ? k.period + "限 " : ""}${esc(subjName(k.subjectId))}：課題の内容を確認`, s:`今の設定：「${esc(k.title)}」締切 ${md(due)} ${hm(due)}。今日のうちなら自由に直せます`,
+      acts:`<button class="btn sm primary" data-act="task-edit" data-id="${k.id}">内容・締切を入れる</button><button class="btn sm" data-act="task-ok" data-id="${k.id}">このままでよい</button><button class="btn sm" data-act="task-none" data-id="${k.id}">今回は課題なし</button>` });
+  }
   for (const k of openTasks()) {
     const left = fromLocalInput(k.due) - now; if (left > 48 * 3600000) break;
     const nm = `${k.subjectId ? esc(subjName(k.subjectId)) + "：" : ""}${esc(k.title)}`;
@@ -929,6 +937,7 @@ function renderClass() {
   cp.innerHTML = `<option value="">－</option>` + D.cfg.periods.map((p, i) => `<option value="${i+1}">${i+1}限 ${p[0]}</option>`).join("");
   cp.value = pcur;
   const st = curStatus(), onsite = ONSITE.includes(st);
+  if (!$("cDate").dataset.touched) $("cDate").value = today();   // 開きっぱなしで日付が変わっても今日になるように
   $("cDateWrap").hidden = onsite;
   $("cHoursWrap").hidden = !(st === "absent" || st === "official");
   $("cSubmit").textContent = busy === "class" ? "位置を確認中…" : busy === "photo" ? "撮影中…" : onsite ? (D.cfg.photo ? "写真＋GPSで記録" : "位置を確認して記録") : "記録する";
@@ -955,6 +964,38 @@ function renderClass() {
       ${l.note ? `<div class="note">${esc(l.note)}</div>` : ""}</div>`;
   }).join("") : `<p class="empty">まだ記録がありません</p>`;
 }
+/* ---------- 授業後の課題の自動登録 ----------
+ * 授業が終わったら「科目の課題」を締切 autoTaskDays 日後 23:59 で登録する（同じ日の同じ科目は1件）。
+ * その授業の日のうちは内容・締切を自由に直せる。「今回は課題なし」もその日のうちなら罰なし。 */
+function autoTasks() {
+  if (D.cfg.autoTask === false || !D.subjects.length) return false;
+  const now = Date.now(), add = [];
+  for (let i = 3; i >= 0; i--) {
+    const d = ymd(new Date(addDays(dayStart(), -i)));
+    if (d < AUTO_TASK_FROM || isOff(d)) continue;
+    const bySub = new Map();
+    for (const s of slotsOn(d)) {
+      if (s.end > now) continue;
+      const l = logFor(d, s); if (l && l.status === "cancel") continue;
+      const prev = bySub.get(s.subjectId); if (!prev || s.end > prev.end) bySub.set(s.subjectId, s);
+    }
+    for (const [sid, s] of bySub) {
+      const key = `${d}:${sid}`; if (D.tasks.some(t => t.autoKey === key)) continue;
+      add.push({ id: rid(), subjectId: sid, title: `${subjName(sid)}の課題`, due: `${ymd(new Date(addDays(parseD(d).getTime(), +D.cfg.autoTaskDays || 2)))}T23:59`, note: "",
+        created: now, done: null, auto: true, autoKey: key, classDate: d, period: s.period, detailed: false });
+    }
+  }
+  if (!add.length) return false;
+  D.tasks.push(...add); save(`アプリ: 授業後の課題を自動登録（${add.length}件）`, true);
+  return true;
+}
+function dropAutoTask(date, subjectId) {
+  const k = D.tasks.find(t => t.autoKey === `${date}:${subjectId}` && !t.done && !t.deleted);
+  if (k) { k.deleted = Date.now(); k.none = "cancel"; }
+}
+/* 自由に直せる期間：自動登録はその授業の日の終わりまで、手で登録したものは登録から10分 */
+const freeEditUntil = k => k.auto ? addDays(parseD(k.classDate).getTime(), 1) - 1 : (k.created || 0) + FREE_DELETE_MS;
+let taskEditing = null, taskDraft = {};
 /* 週の目標に数える作業時間（GOAL_VERIFIED_FROM 以降の週は位置確認済みだけ） */
 function goalHours(ws, we) { const strict = ymd(new Date(ws)) >= GOAL_VERIFIED_FROM; return D.sessions.reduce((a, s) => a + (!strict || verified(s) ? overlap(s, ws, we) : 0), 0); }
 /* ---------- 課題 ---------- */
@@ -987,9 +1028,16 @@ function renderTasks() {
     const due = fromLocalInput(k.due);
     return `<div class="task ${k.done ? "done" : ""}">
       <div class="tt"><b>${esc(k.title)}</b>
-        <div class="meta">${k.subjectId ? `<span>${esc(subjName(k.subjectId))}</span>` : ""}<span class="due">締切 ${md(due)} ${hm(due)}</span><span class="pill ${cls}">${txt}</span>${k.done ? `<span class="due">提出 ${md(k.done)} ${hm(k.done)}</span>` : ""}${k.done ? { pending: SY.token ? `<span class="pill info">証拠：今夜Claudeが確認</span>` : `<span class="pill off">証拠：端末チェック済み</span>`, ok:`<span class="pill ok">証拠：Claude確認済み</span>`, local:`<span class="pill off">証拠：端末チェック済み</span>` }[k.verify] || "" : ""}${k.proof ? thumb(k.proof, "提出物") : ""}</div>${!k.done && k.proofNg ? `<div class="gpsmsg crit" style="margin-top:4px">証拠が認められませんでした（${esc(k.proofNg)}）。撮り直して提出してください</div>` : ""}</div>
-      <div class="acts">${k.done ? `<button class="btn link sm" data-act="task-undo" data-id="${k.id}">未提出に戻す</button>` : `<button class="btn sm primary" data-act="task-done" data-id="${k.id}" ${busy ? "disabled" : ""}>${D.cfg.taskProof === false ? "提出した" : "写真で提出"}</button>`}${delBtn("k:" + k.id, "task-del", k.id)}</div>
+        <div class="meta">${k.auto ? `<span class="pill off">授業後の自動登録</span>` : ""}${k.subjectId ? `<span>${esc(subjName(k.subjectId))}</span>` : ""}<span class="due">締切 ${md(due)} ${hm(due)}</span><span class="pill ${cls}">${txt}</span>${k.done ? `<span class="due">提出 ${md(k.done)} ${hm(k.done)}</span>` : ""}${k.done ? { pending: SY.token ? `<span class="pill info">証拠：今夜Claudeが確認</span>` : `<span class="pill off">証拠：端末チェック済み</span>`, ok:`<span class="pill ok">証拠：Claude確認済み</span>`, local:`<span class="pill off">証拠：端末チェック済み</span>` }[k.verify] || "" : ""}${k.proof ? thumb(k.proof, "提出物") : ""}</div>${!k.done && k.proofNg ? `<div class="gpsmsg crit" style="margin-top:4px">証拠が認められませんでした（${esc(k.proofNg)}）。撮り直して提出してください</div>` : ""}</div>
+      <div class="acts">${k.done ? `<button class="btn link sm" data-act="task-undo" data-id="${k.id}">未提出に戻す</button>` : `<button class="btn sm primary" data-act="task-done" data-id="${k.id}" ${busy ? "disabled" : ""}>${D.cfg.taskProof === false ? "提出した" : "写真で提出"}</button>`}${k.done ? "" : `<button class="btn link sm" data-act="task-edit" data-id="${k.id}">編集</button>`}${k.auto && !k.done && Date.now() <= freeEditUntil(k) ? `<button class="btn link sm" data-act="task-none" data-id="${k.id}">課題なし</button>` : delBtn("k:" + k.id, "task-del", k.id)}</div>
       ${k.note ? `<div class="note">${esc(k.note)}</div>` : ""}
+      ${taskEditing === k.id ? `<div class="editor" style="grid-column:1/-1"><form class="form" data-form="task" data-id="${k.id}">
+        <div class="field" style="flex-basis:100%"><label for="teTitle">課題の内容</label><input type="text" id="teTitle" maxlength="60" value="${esc(taskDraft.teTitle ?? k.title)}"></div>
+        <div class="field" style="flex-basis:220px"><label for="teDue">締切</label><input type="datetime-local" id="teDue" value="${esc(taskDraft.teDue ?? k.due)}"></div>
+        <div class="field" style="flex-basis:100%"><label for="teNote">メモ（提出方法など）</label><input type="text" id="teNote" maxlength="80" value="${esc(taskDraft.teNote ?? k.note ?? "")}"></div>
+        <p class="small muted" style="flex-basis:100%">${Date.now() <= freeEditUntil(k) ? `${k.auto ? "今日のうち" : "登録から10分以内"}なので、締切も自由に変えられます` : "締切を延ばすのは24時間後に有効です（早めるのはすぐ）"}</p>
+        <div class="btnrow"><button class="btn primary" type="submit">保存</button><button class="btn" type="button" data-act="task-edit-cancel">キャンセル</button></div>
+      </form></div>` : ""}
     </div>`;
   };
   $("taskOpen").innerHTML = open.length ? open.map(row).join("") : `<p class="empty">未提出の課題はありません。出たらすぐ上で登録してください</p>`;
@@ -1063,7 +1111,7 @@ function renderSettings() {
       ${p.lat != null ? `<a class="btn sm" style="text-decoration:none;display:inline-flex;align-items:center" href="https://www.google.com/maps?q=${p.lat},${p.lon}" target="_blank" rel="noopener">地図で確認</a>` : ""}</div>
     </div>`;
   }).join("");
-  if (!dirty.acc) { $("gAcc").value = D.cfg.maxAcc; $("gPhoto").checked = !!D.cfg.photo; $("gProof").checked = D.cfg.taskProof !== false; }
+  if (!dirty.acc) { $("gAcc").value = D.cfg.maxAcc; $("gPhoto").checked = !!D.cfg.photo; $("gProof").checked = D.cfg.taskProof !== false; $("gAuto").checked = D.cfg.autoTask !== false; }
   if (!dirty.grace) $("gGrace").value = D.cfg.grace;
   $("subList").innerHTML = D.subjects.length ? D.subjects.map(s => `<div class="row"><span class="date">${s.hours}時間</span><div class="main"><b>${esc(s.name)}</b><span class="muted small">上限${Math.floor(s.hours / Math.max(1, D.cfg.limitDen))}時間</span></div><div>${delBtn("u:" + s.id, "sub-del", s.id)}</div></div>`).join("")
     : `<p class="empty">まだ科目がありません</p>`;
@@ -1351,7 +1399,7 @@ async function recordClass({ subjectId, status, period, date, hours, note }, msg
     catch (e) { busy = false; msgEl.hidden = false; msgEl.className = "gpsmsg crit"; msgEl.textContent = e.msg + "　記録していません。"; render(); return false; }
     busy = false;
   }
-  D.logs.push(rec); save();
+  D.logs.push(rec); if (status === "cancel") dropAutoTask(rec.date, subjectId); save();
   msgEl.hidden = false; msgEl.className = onsite ? "gpsmsg ok" : "gpsmsg";
   msgEl.textContent = `${subjName(subjectId)}：${ST[status][0]}を記録しました${onsite ? `（${geoText(rec.geo)}）` : ""}`;
   render(); return true;
@@ -1417,6 +1465,12 @@ document.addEventListener("click", e => {
   if (a === "menu-del") { if (armed !== "menu:" + id) return arm("menu:" + id); armed = null; D.penalty.menu = D.penalty.menu.filter(m => m.id !== id); save(); render(); return; }
   if (a === "preset") return applyPreset(false);
   if (a === "task-done") return submitTask(id);
+  if (a === "task-edit") { taskEditing = id; taskDraft = {}; setTab("task"); renderTasks(); const el = $("teTitle"); if (el) { el.scrollIntoView({ block: "center" }); el.focus(); } return; }
+  if (a === "task-edit-cancel") { taskEditing = null; taskDraft = {}; renderTasks(); return; }
+  if (a === "task-ok") { const k = D.tasks.find(x => x.id === id); if (k) { k.detailed = true; save("自動登録の課題をこのまま確定"); render(); } return; }
+  if (a === "task-none") { const k = D.tasks.find(x => x.id === id); if (!k) return;
+    if (Date.now() > freeEditUntil(k)) return toast("「課題なし」にできるのは授業の日のうちだけです");
+    k.deleted = Date.now(); k.none = "user"; k.detailed = true; save(`今回は課題なし：${subjName(k.subjectId)}`); render(); toast("今回は課題なしにしました"); return; }
   if (a === "task-undo") { const k = D.tasks.find(x => x.id === id); if (k) { if (k.proof) dropPhotos(k.proof); Object.assign(k, { done: null, proof: null, proofHash: null, verify: null, proofUp: false }); save("課題を未提出に戻す"); render(); } return; }
   if (a === "task-del") { if (armed !== "k:" + id) return arm("k:" + id); armed = null; const k = D.tasks.find(x => x.id === id); if (!k) return;
     if (k.created && Date.now() - k.created < FREE_DELETE_MS) D.tasks = D.tasks.filter(x => x.id !== id); else { k.deleted = Date.now(); if (!k.done) deletionFlag(k.created, `課題「${k.title}」`); }
@@ -1444,8 +1498,9 @@ document.addEventListener("input", e => {
   const t = e.target, id = t.id || "";
   if (draft && ["eStart","eEnd","eNote"].includes(id)) draft[{ eStart:"start", eEnd:"end", eNote:"note" }[id]] = t.value;
   if (id === "punchNote") punchDraft = t.value;
+  if (id === "teTitle" || id === "teDue" || id === "teNote") taskDraft[id] = t.value;
   if (["rDen","rLate","rOff"].includes(id)) dirty.rule = true;
-  if (id === "gAcc" || id === "gPhoto" || id === "gProof") dirty.acc = true;
+  if (id === "gAcc" || id === "gPhoto" || id === "gProof" || id === "gAuto") dirty.acc = true;
   if (id === "kKeep") dirty.keep = true;
   if (id === "gGrace") dirty.grace = true;
   if (id === "rStart" || id === "rEnd" || id === "rGoal" || id.startsWith("rd-")) dirty.robo = true;
@@ -1455,7 +1510,7 @@ document.addEventListener("input", e => {
 document.addEventListener("change", e => {
   const t = e.target;
   if (t.name === "cst") { $("classMsg").hidden = true; renderClass(); }
-  if (t.id === "cPeriod") t.dataset.touched = "1";
+  if (t.id === "cPeriod" || t.id === "cDate") t.dataset.touched = "1";
   if (t.dataset.tt) {
     const key = t.dataset.tt, [w, pd] = key.split("-");
     if (t.value) { D.tt[key] = t.value; save("時間割を変更"); render(); toast("時間割を保存しました"); }
@@ -1510,7 +1565,7 @@ document.addEventListener("submit", e => {
     pushRecords(true).then(() => { if (!SY.err) { toast("接続できました。記録を送りました"); fetchAdvice(); } });
     return;
   }
-  if (f.id === "geoForm") { tightLoose("位置・写真の設定", { maxAcc: Math.max(10, Math.min(500, +$("gAcc").value || 100)), photo: $("gPhoto").checked, taskProof: $("gProof").checked }); dirty.acc = false; return; }
+  if (f.id === "geoForm") { tightLoose("位置・写真の設定", { maxAcc: Math.max(10, Math.min(500, +$("gAcc").value || 100)), photo: $("gPhoto").checked, taskProof: $("gProof").checked, autoTask: $("gAuto").checked }); dirty.acc = false; return; }
   if (f.id === "keepForm") { tightLoose("写真を残す期間", { photoKeepDays: Math.max(0, +$("kKeep").value || 0) }); dirty.keep = false; usageAt = 0; return; }
   if (f.id === "graceForm") { tightLoose("催促までの時間", { grace: Math.max(0, Math.min(90, +$("gGrace").value || 0)) }); dirty.grace = false; return; }
   if (f.id === "subForm") { const name = $("sName").value.trim(); if (!name) return; D.subjects.push({ id: rid(), name, hours: Math.max(1, +$("sHours").value || 60) }); save(); $("sName").value = ""; render(); toast(`${name} を追加しました。時間割にも入れてください`); return; }
@@ -1519,6 +1574,15 @@ document.addEventListener("submit", e => {
     dirty.robo = false; return;
   }
   if (f.id === "ruleForm") { tightLoose("欠課のルール", { limitDen: Math.max(2, Math.min(10, +$("rDen").value || 3)), lateUnit: Math.max(1, Math.min(10, +$("rLate").value || 3)), officialCounts: $("rOff").checked }); dirty.rule = false; return; }
+  if (f.dataset.form === "task") {
+    const k = D.tasks.find(x => x.id === f.dataset.id); if (!k) return;
+    const title = $("teTitle").value.trim() || k.title, due = $("teDue").value || k.due, note = $("teNote").value.trim();
+    const later = fromLocalInput(due) > fromLocalInput(k.due), free = Date.now() <= freeEditUntil(k);
+    Object.assign(k, { title, note, detailed: true }); if (!later || free) k.due = due;
+    taskEditing = null; taskDraft = {}; save("課題の内容を編集");
+    if (later && !free) return schedule(`課題「${title}」の締切を${md(fromLocalInput(due))} ${hm(fromLocalInput(due))}に延ばす`, "taskEdit", { id: k.id, due });
+    render(); toast("保存しました"); return;
+  }
   if (f.id === "taskForm") {
     const title = $("kTitle").value.trim(), due = $("kDue").value;
     if (!title || !due) return toast("課題の内容と締切を入れてください");
@@ -1552,7 +1616,8 @@ function isLooser(k, nv, ov) {
   switch (k) {
     case "maxAcc": case "grace": case "lateUnit": case "roboStart": return nv > ov;
     case "limitDen": case "weekGoal": case "roboEnd": return nv < ov;
-    case "photo": case "officialCounts": case "taskProof": return ov && !nv;
+    case "photo": case "officialCounts": case "taskProof": case "autoTask": return ov && !nv;
+    case "autoTaskDays": return nv > ov;
     case "photoKeepDays": return (nv || Infinity) < (ov || Infinity);
     case "roboDays": return ov.some(x => !nv.includes(x));
     default: return JSON.stringify(nv) !== JSON.stringify(ov);
@@ -1632,6 +1697,7 @@ function exportPayload() {
   };
   const la = localAdvice(); summary.appAdvice = { headline: la.headline, items: la.items.map(x => x.text), plan: la.plan };
   summary.integrity = { flags: (D.flags || []).slice(-10).map(f => ({ date: f.date, type: penLabel(f.type), detail: f.detail })), pending: D.pending.map(c => ({ label: c.label, at: toLocalInput(c.at) })),
+    noAssignmentLast14d: D.tasks.filter(k => k.none === "user" && Date.now() - k.deleted < 14 * 864e5).length,
     offDaysThisMonth: D.offDays.filter(x => x.startsWith(today().slice(0, 7))).length, cancelsLast30d: D.logs.filter(l => l.status === "cancel" && Date.now() - l.ts < 30 * 864e5).length };
   const audit = { ver: A.ver, len: A.len, head: A.head, entries: A.entries.slice(-120).map(e => ({ t: toLocalInput(e.t), a: e.a, sys: e.sys, p: e.p, h: e.h })) };
   return { app: "kintai", schema: 1, timezone: "Asia/Tokyo", summary, data, audit };
@@ -1816,6 +1882,7 @@ if (D.cfg.roboStart === "16:30") sysChange("ロボコンの活動日を設定", 
 if (!D.subjects.length && !Object.keys(D.tt).length) applyPreset(true);
 applyDuePending();
 checkClock();
+autoTasks();
 setTimeout(purgePhotos, 3000);
 $("cDate").value = today();
 let t0 = "punch"; try { t0 = sessionStorage.getItem("kintai.tab") || "punch"; } catch {}
@@ -1826,9 +1893,9 @@ $("syRepo").value = SY.repo; $("syToken").value = SY.token;
 renderSync(); renderAdvice();
 if (SY.token) { pushRecords(false); fetchAdvice(); }
 setInterval(tick, 1000);
-setInterval(() => { if (!document.hidden && Date.now() % 3600000 < 60000) purgePhotos(); if (!busy && !editing && !document.hidden) { checkClock(); if (applyDuePending()) render(); renderTodo(penaltyState()); renderAdvice(); renderTasks(); renderGuard(); } }, 60000);
+setInterval(() => { if (!document.hidden && Date.now() % 3600000 < 60000) purgePhotos(); if (!busy && !editing && !document.hidden) { checkClock(); if (applyDuePending() | autoTasks()) render(); renderTodo(penaltyState()); renderAdvice(); renderTasks(); renderGuard(); } }, 60000);
 window.addEventListener("storage", e => { if (e.key === KEY && !busy) { load(); render(); } });
-document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) { checkClock(); applyDuePending(); punchMsg = null; $("todoMsg").hidden = true; $("classMsg").hidden = true; render(); if (SY.token) { pushRecords(false); if (Date.now() - SY.adviceAt > 120000) fetchAdvice(); } } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) { checkClock(); applyDuePending(); autoTasks(); punchMsg = null; $("todoMsg").hidden = true; $("classMsg").hidden = true; render(); if (SY.token) { pushRecords(false); if (Date.now() - SY.adviceAt > 120000) fetchAdvice(); } } });
 })();
 </script>
 </body>
