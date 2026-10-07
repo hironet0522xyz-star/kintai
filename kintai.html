@@ -4,7 +4,6 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#17202B">
-<meta name="apple-mobile-web-app-capable" content="yes">
 <title>授業・ロボコン勤怠</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -448,7 +447,7 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
     </div>
     <div class="box" id="syncBox">
       <div class="box-head"><h2>Claude連携</h2><span id="syncPill"></span></div>
-      <p class="muted small">記録をGitHubの非公開リポジトリに保存し、毎晩21時ごろにClaudeが読んでアドバイスを書きます。アドバイスはアプリを開くと「打刻」タブの一番上に出ます（連携しなくても、アプリ自身の分析はいつでも出ます）。写真と緯度・経度は送りません（距離と誤差だけ送ります）。</p>
+      <p class="muted small">記録をGitHubの非公開リポジトリに保存し、毎晩21時ごろにClaudeが読んでアドバイスを書きます。アドバイスはアプリを開くと「打刻」タブの一番上に出ます（連携しなくても、アプリ自身の分析はいつでも出ます）。Claudeが読む要約には写真も緯度・経度も入れません（距離と誤差だけ）。別に、写真以外の記録の控え（位置を含む）をこの非公開リポジトリに保存するので、空の端末やSafariで鍵を入れると記録を引き継げます。</p>
       <form class="form" id="syncForm">
         <div class="field" style="flex-basis:100%"><label for="syRepo">保存先（ユーザー名/リポジトリ名）</label><input type="text" id="syRepo" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
         <div class="field" style="flex-basis:100%"><label for="syToken">アクセス用の鍵（トークン）</label><input type="password" id="syToken" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="github_pat_ で始まる文字列"></div>
@@ -572,7 +571,7 @@ function save(action, sys) {
  *  - 機能を変えたら APP_VERSION を上げる（更新の記録が監査ログに1行残る）。
  *  - 監査ログ（kintai.audit）の形式を変えるときも消さずに追記で移行する。長さが減るとClaudeが巻き戻しと判定する。
  */
-const APP_VERSION = "2026.10.07-sheet6";
+const APP_VERSION = "2026.10.07-state7";
 const GOAL_VERIFIED_FROM = "2026-10-12";
 const AUTO_TASK_FROM = "2026-10-08";        // この日の授業から、授業後に課題を自動登録する（それより前には遡らない）   // この週から、週の目標は位置確認済みの作業時間だけで数える（それより前の週には遡らない）
 const AUDIT_KEY = "kintai.audit", SEEN_KEY = "kintai.seen", DELAY_MS = 24 * 3600000, FREE_DELETE_MS = 10 * 60000;
@@ -638,7 +637,7 @@ function applyChange(c) {
   else if (c.kind === "addSess") D.sessions.push(d);
   else if (c.kind === "subDel") { D.subjects = D.subjects.filter(x => x.id !== d.id); for (const k in D.tt) if (D.tt[k] === d.id) delete D.tt[k]; }
   else if (c.kind === "syncOff") { Object.assign(SY, { token:"", sha:null, lastHash:"", lastPush:0, advice:null, err:"" }); saveSync(); }
-  else if (c.kind === "wipe") { const g = D.guard, f = D.flags; D = blank(); D.guard = g; D.flags = f; photoCache.clear(); idb.clear().catch(() => {}); }
+  else if (c.kind === "wipe") { const g = { ...(D.guard || {}), wipedAt: Date.now() }, f = D.flags; D = blank(); D.guard = g; D.flags = f; photoCache.clear(); idb.clear().catch(() => {}); }
 }
 function applyDuePending() {
   const now = Date.now(), due = D.pending.filter(c => c.at <= now);
@@ -1599,7 +1598,8 @@ document.addEventListener("submit", e => {
     if (!token) return toast("鍵（トークン）を貼り付けてください");
     if (repo !== SY.repo || token !== SY.token) Object.assign(SY, { sha:null, lastHash:"", advice:null });
     Object.assign(SY, { repo, token, err:"" }); saveSync(); $("syRepo").value = repo;
-    pushRecords(true).then(() => { if (!SY.err) { toast("接続できました。記録を送りました"); fetchAdvice(); } });
+    const before = isEmptyLocal();
+    pushRecords(true).then(() => { if (!SY.err) { if (!(before && !isEmptyLocal())) toast("接続できました。記録を送りました"); fetchAdvice(); } });
     return;
   }
   if (f.id === "geoForm") { tightLoose("位置・写真の設定", { maxAcc: Math.max(10, Math.min(500, +$("gAcc").value || 100)), photo: $("gPhoto").checked, taskProof: $("gProof").checked, autoTask: $("gAuto").checked }); dirty.acc = false; return; }
@@ -1746,8 +1746,33 @@ function exportPayload() {
   const audit = { ver: A.ver, len: A.len, head: A.head, entries: A.entries.slice(-120).map(e => ({ t: toLocalInput(e.t), a: e.a, sys: e.sys, p: e.p, h: e.h })) };
   return { app: "kintai", schema: 1, timezone: "Asia/Tokyo", summary, data, audit };
 }
+/* 記録の控え（写真以外のすべて）を state.json に置く。空の端末・別の開き方で鍵を入れると引き継げる */
+const isEmptyLocal = () => !D.sessions.length && !D.logs.length && !D.tasks.some(t => !(t.auto && !t.detailed && !t.done));
+async function pushState() {
+  const body = JSON.stringify({ app: "kintai-state", savedAt: new Date().toISOString(), state: D });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = await gh("state.json", { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ message:`記録の控え ${today()} ${hm(Date.now())}`, content: b64(body), ...(SY.stateSha ? { sha: SY.stateSha } : {}) }) });
+    if (r.ok) { const j = await r.json(); SY.stateSha = j.content && j.content.sha; return; }
+    if ((r.status === 409 || r.status === 422) && attempt === 0) { const m = await gh("state.json"); SY.stateSha = m.ok ? (await m.json()).sha : null; continue; }
+    return;
+  }
+}
+async function pullState() {
+  if (!SY.token || !isEmptyLocal() || (D.guard && D.guard.wipedAt)) return false;
+  try {
+    const r = await gh("state.json", { headers:{ Accept:"application/vnd.github.raw+json" } }); if (!r.ok) return false;
+    const x = (JSON.parse(await r.text()) || {}).state;
+    if (!x || !Array.isArray(x.sessions) || !(x.sessions.length || (x.logs || []).length || (x.tasks || []).length)) return false;
+    const g = D.guard, fl = D.flags; D = normalize(x); D.guard = g;
+    const ids = new Set((D.flags || []).map(f => f.id)); D.flags = [...(D.flags || []), ...fl.filter(f => !ids.has(f.id))];
+    save("GitHubから記録を引き継ぎ"); render();
+    toast(`GitHubから記録を引き継ぎました（授業${D.logs.length}件・入退室${D.sessions.length}件・課題${D.tasks.length}件）`);
+    return true;
+  } catch { return false; }
+}
 async function pushRecords(force) {
   if (!SY.token || syncing) return;
+  if (isEmptyLocal() && !(D.guard && D.guard.wipedAt)) { syncing = true; const got = await pullState(); syncing = false; if (got) force = true; }
   const p = exportPayload(), h = hashStr(JSON.stringify(p));
   if (!force && h === SY.lastHash) { if (await uploadProofs()) { SY.lastHash = ""; scheduleSync(); } return; }
   syncing = true; renderSync();
@@ -1756,7 +1781,7 @@ async function pushRecords(force) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const r = await gh("records.json", { method:"PUT", headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({ message:`記録を同期 ${today()} ${hm(Date.now())}`, content: b64(body), ...(SY.sha ? { sha: SY.sha } : {}) }) });
-      if (r.ok) { const j = await r.json(); SY.sha = j.content && j.content.sha; SY.lastHash = h; SY.lastPush = Date.now(); SY.err = ""; if (await uploadProofs()) SY.lastHash = ""; break; }
+      if (r.ok) { const j = await r.json(); SY.sha = j.content && j.content.sha; SY.lastHash = h; SY.lastPush = Date.now(); SY.err = ""; await pushState(); if (await uploadProofs()) SY.lastHash = ""; break; }
       if ((r.status === 409 || r.status === 422) && attempt === 0) { const m = await gh("records.json"); SY.sha = m.ok ? (await m.json()).sha : null; continue; }
       throw r;
     }
@@ -1938,7 +1963,7 @@ render();
 $("syRepo").value = SY.repo; $("syToken").value = SY.token;
 renderSync(); renderAdvice();
 setTimeout(() => { openFromLink(); maybeShowTaskSheet(); }, 500);
-if (SY.token) { pushRecords(false); fetchAdvice(); }
+if (SY.token) { pushRecords(!SY.stateSha); fetchAdvice(); }   // 控えがまだ無ければ必ず送る
 setInterval(tick, 1000);
 setInterval(() => { if (!document.hidden && Date.now() % 3600000 < 60000) purgePhotos(); if (!busy && !editing && !document.hidden) { checkClock(); if (applyDuePending() | autoTasks()) render(); maybeShowTaskSheet(); renderTodo(penaltyState()); renderAdvice(); renderTasks(); renderGuard(); } }, 60000);
 window.addEventListener("storage", e => { if (e.key === KEY && !busy) { load(); render(); } });
