@@ -456,6 +456,7 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
       <div class="gpsmsg" id="syncStatus" hidden></div>
       <div class="btnrow" id="syncActs" hidden>
         <button class="btn sm" data-act="sync-now">今すぐ同期</button>
+        <button class="btn sm" data-act="copy-key">鍵をコピー</button>
         <button class="btn sm danger" data-act="sync-off">連携を解除</button>
       </div>
     </div>
@@ -571,7 +572,7 @@ function save(action, sys) {
  *  - 機能を変えたら APP_VERSION を上げる（更新の記録が監査ログに1行残る）。
  *  - 監査ログ（kintai.audit）の形式を変えるときも消さずに追記で移行する。長さが減るとClaudeが巻き戻しと判定する。
  */
-const APP_VERSION = "2026.10.07-state7";
+const APP_VERSION = "2026.10.07-copykey8";
 const GOAL_VERIFIED_FROM = "2026-10-12";
 const AUTO_TASK_FROM = "2026-10-08";        // この日の授業から、授業後に課題を自動登録する（それより前には遡らない）   // この週から、週の目標は位置確認済みの作業時間だけで数える（それより前の週には遡らない）
 const AUDIT_KEY = "kintai.audit", SEEN_KEY = "kintai.seen", DELAY_MS = 24 * 3600000, FREE_DELETE_MS = 10 * 60000;
@@ -1515,6 +1516,11 @@ document.addEventListener("click", e => {
   if (a === "due-tonight") { $("kDue").value = `${today()}T23:59`; return; }
   if (a === "due-week") { $("kDue").value = `${ymd(new Date(addDays(dayStart(), 7)))}T23:59`; return; }
   if (a === "advice-toggle") { const ca = SY.advice, fresh = ca && Date.now() - (Date.parse(ca.generatedAt) || 0) < 14 * 3600000; const cur = adviceView || (fresh ? "claude" : "app"); adviceView = cur === "claude" ? "app" : "claude"; renderAdvice(); return; }
+  if (a === "copy-key") {
+    const show = () => { const el = $("syToken"); el.type = "text"; el.focus(); el.select(); toast("鍵を表示しました。選択してコピーしてください"); setTimeout(() => { el.type = "password"; }, 60000); };
+    try { navigator.clipboard.writeText(SY.token).then(() => toast("鍵をコピーしました。Safariで開いたアプリに貼り付けてください"), show); } catch { show(); }
+    return;
+  }
   if (a === "sync-now") { SY.err = ""; pushRecords(true).then(fetchAdvice); return; }
   if (a === "sync-off") { if (armed !== "syncoff") return arm("syncoff"); armed = null; return schedule("Claude連携を解除", "syncOff", {}); }
   if (a === "place-here") return placeHere(b.dataset.key);
