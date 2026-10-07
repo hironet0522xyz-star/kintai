@@ -356,7 +356,7 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
         <div class="ptsgrid" id="ptsGrid"></div>
         <div><button class="btn primary" type="submit">保存</button></div>
       </form>
-      <p class="muted small">点数を変えると、過去の分も新しい点数で計算し直されます。休講や学校の休みの日は罰になりません（授業タブの「休講」、打刻タブの「今日は休み」）。</p>
+      <p class="muted small">点数を上げるとその日から、下げると24時間後の翌日分から有効です（過去の分は変わりません）。休講や学校の休みの日は罰になりません（授業タブの「休講」、打刻タブの「今日は休み」）。</p>
     </div>
   </section>
 
@@ -433,6 +433,12 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
         <button class="btn primary" type="submit">保存</button>
       </form>
     </div>
+    <div class="box" id="guardBox">
+      <div class="box-head"><h2>不正対策</h2><span id="guardPill"></span></div>
+      <p class="muted small">ルールを甘くする変更（罰の点数を下げる・半径を広げる・写真をやめる・時間割から授業を外す・連携の解除・全消去など）は24時間後に有効になります。登録から10分以上たった記録を消すと罰ポイント、アプリの外での書き換えや時計の巻き戻しは自動で検知して罰ポイントになります。</p>
+      <div class="small" id="guardInfo"></div>
+      <div class="list" id="pendList"></div>
+    </div>
     <div class="box" id="syncBox">
       <div class="box-head"><h2>Claude連携</h2><span id="syncPill"></span></div>
       <p class="muted small">記録をGitHubの非公開リポジトリに保存し、毎晩21時ごろにClaudeが読んでアドバイスを書きます。アドバイスはアプリを開くと「打刻」タブの一番上に出ます（連携しなくても、アプリ自身の分析はいつでも出ます）。写真と緯度・経度は送りません（距離と誤差だけ送ります）。</p>
@@ -494,8 +500,10 @@ const PEN_TYPES = [
   ["forgot", "退室し忘れ（14時間以上）", 2],
   ["unverified","位置確認なしの入退室・手動修正", 1],
   ["goal",   "週の作業目標に届かなかった", 3],
-  ["overdue","課題の期限切れ（未提出）", 3],
-  ["latesub","課題の遅れ提出", 1],
+  ["overdue","課題の期限切れ（未提出）", 3, "2026-10-07"],
+  ["latesub","課題の遅れ提出", 1, "2026-10-07"],
+  ["tamper", "改ざん・時計の巻き戻し（自動検知）", 5, "2026-10-07"],
+  ["delete", "記録の削除（登録から10分以上たったもの）", 1, "2026-10-07"],
   ["clean",  "1週間ノーミス（ボーナス）", -2]
 ];
 const today = () => ymd(new Date());
@@ -503,15 +511,129 @@ function penDef() { return { on:true, since: ymd(new Date(addDays(Date.now(), 1)
   menu:[{ id:"p1", name:"腕立て伏せ50回", cost:3 },{ id:"p2", name:"部室の掃除", cost:3 },{ id:"p3", name:"スマホゲーム1日禁止", cost:5 },{ id:"p4", name:"おやつ・ジュース1週間禁止", cost:8 }], paid:[] }; }
 
 /* ---------- 保存 ---------- */
-function blank() { return { v:2, places: JSON.parse(JSON.stringify(PLACE_DEF)), cfg: JSON.parse(JSON.stringify(CFG_DEF)), subjects:[], sessions:[], logs:[], tasks:[], tt:{}, offDays:[], penalty: penDef() }; }
+function blank() { return { v:2, places: JSON.parse(JSON.stringify(PLACE_DEF)), cfg: JSON.parse(JSON.stringify(CFG_DEF)), subjects:[], sessions:[], logs:[], tasks:[], tt:{}, offDays:[], flags:[], pending:[], penalty: penDef() }; }
 function normalize(x) {
   const b = blank();
   const p = { ...b.penalty, ...(x.penalty || {}) }; p.pts = { ...b.penalty.pts, ...((x.penalty || {}).pts || {}) };
-  return { ...b, ...x, v:2, places:{ ...b.places, ...(x.places || {}) }, cfg:{ ...b.cfg, ...(x.cfg || {}) }, tt: x.tt || {}, offDays: x.offDays || [], tasks: x.tasks || [], penalty: p };
+  return { ...b, ...x, v:2, places:{ ...b.places, ...(x.places || {}) }, cfg:{ ...b.cfg, ...(x.cfg || {}) }, tt: x.tt || {}, offDays: x.offDays || [], tasks: x.tasks || [], flags: x.flags || [], pending: x.pending || [], penalty: p };
 }
 let D = null, storageOk = true;
-function load() { D = blank(); try { const raw = localStorage.getItem(KEY); if (raw) D = normalize(JSON.parse(raw)); } catch { storageOk = false; } }
-function save() { try { localStorage.setItem(KEY, JSON.stringify(D)); } catch { storageOk = false; toast("保存できませんでした。プライベートモードでは記録が残りません"); } scheduleSync(); }
+let rawAtLoad = null;
+function load() { D = blank(); try { const raw = localStorage.getItem(KEY); rawAtLoad = raw; if (raw) D = normalize(JSON.parse(raw)); } catch { storageOk = false; } }
+/* save(何をしたか, アプリ自身の変更か) — 保存のたびに監査ログへ1行足す（不正対策を参照） */
+function save(action, sys) {
+  const raw = JSON.stringify(D);
+  try { localStorage.setItem(KEY, raw); } catch { storageOk = false; toast("保存できませんでした。プライベートモードでは記録が残りません"); return; }
+  appendAudit(action || "変更", sys, raw);
+  scheduleSync();
+}
+
+/* ================= 不正対策（端末の中でできる範囲） =================
+ * ねらい：ルールをこっそり甘くしたり、記録を消したり書き換えたりすると、必ず痕跡と罰が残るようにする。
+ *  1. 監査ログ：保存のたびに「時刻・操作・保存データのハッシュ・前の行のハッシュ」を鎖状に記録する。
+ *     起動時に、保存データが最後の行のハッシュと一致するか、鎖が切れていないかを確かめる。
+ *  2. 猶予：ルールを甘くする変更（罰の点数を下げる・半径を広げる・写真をやめる・時間割から授業を消す など）は
+ *     24時間後に有効になる。厳しくする変更はすぐ有効。
+ *  3. 削除：登録から10分以上たった記録を消すと罰ポイント。課題は消しても期限切れの判定が残る。
+ *  4. 時計：端末の時計が以前より戻っていたら検知する。
+ *  5. 罰の点数は日付ごとに記録し、あとから下げても過去の分は変わらない。
+ *  6. Claude連携中は監査ログの先頭をGitHubに送り、毎晩Claudeが巻き戻しがないかを確かめる。
+ *
+ * ★ このアプリを改装するAI・開発者へ（正当な改装で罰が出ないために）
+ *  - 起動時の移行処理や既定値の変更は、必ず sysChange("説明", () => { ... }) の中で行う。
+ *    利用者の操作ではないので猶予も罰も付かず、監査ログに「アプリ」の行として残る。
+ *  - localStorage を直接書き換えない（ハッシュが合わなくなり、改ざんとして検知される）。必ず save() を使う。
+ *  - 新しい罰の種類を足すときは PEN_TYPES の4番目に導入日（今日の日付）を書く。それより前には遡らない。
+ *  - 機能を変えたら APP_VERSION を上げる（更新の記録が監査ログに1行残る）。
+ *  - 監査ログ（kintai.audit）の形式を変えるときも消さずに追記で移行する。長さが減るとClaudeが巻き戻しと判定する。
+ */
+const APP_VERSION = "2026.10.07-guard1";
+const AUDIT_KEY = "kintai.audit", SEEN_KEY = "kintai.seen", DELAY_MS = 24 * 3600000, FREE_DELETE_MS = 10 * 60000;
+let A = { v:1, len:0, head:"0", ver:"", entries:[] };
+function cyrb53(str, seed = 0) {
+  let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < str.length; i++) { const ch = str.charCodeAt(i); h1 = Math.imul(h1 ^ ch, 2654435761); h2 = Math.imul(h2 ^ ch, 1597334677); }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (h2 >>> 0).toString(16).padStart(8, "0") + (h1 >>> 0).toString(16).padStart(8, "0");
+}
+const entryHash = e => cyrb53(`${e.p}|${e.t}|${e.a}|${e.sys ? 1 : 0}|${e.s}`);
+function loadAudit() { try { const x = JSON.parse(localStorage.getItem(AUDIT_KEY) || "null"); if (x && Array.isArray(x.entries)) A = x; } catch {} }
+function appendAudit(action, sys, raw) {
+  loadAudit();   // 別のタブが書いた分を取り込んでから足す
+  const e = { t: Date.now(), a: String(action).slice(0, 80), sys: !!sys, s: cyrb53(raw), p: A.head };
+  e.h = entryHash(e);
+  A.head = e.h; A.len++; A.entries.push(e);
+  if (A.entries.length > 400) A.entries.splice(0, A.entries.length - 400);
+  try { localStorage.setItem(AUDIT_KEY, JSON.stringify(A)); } catch {}
+}
+/* 起動直後（移行処理より前）に呼ぶ。問題があれば理由の文を返す */
+function verifyAtLoad() {
+  loadAudit();
+  if (!A.len) return D.guard ? "監査ログが消されています" : null;
+  const last = A.entries[A.entries.length - 1];
+  if (rawAtLoad == null) return "保存データが消されています（監査ログは残っています）";
+  if (!last || last.s !== cyrb53(rawAtLoad)) return "保存データがアプリの外で書き換えられています";
+  for (let i = 0; i < A.entries.length; i++) {
+    const e = A.entries[i];
+    if (e.h !== entryHash(e) || (i > 0 && e.p !== A.entries[i - 1].h)) return "監査ログの鎖が切れています";
+  }
+  return null;
+}
+function addFlag(type, detail) {
+  D.flags.push({ id: rid(), ts: Date.now(), date: today(), type, detail });
+}
+/* アプリ自身（移行・既定値の変更）による変更。猶予も罰もなし */
+function sysChange(label, fn) { fn(); save("アプリ: " + label, true); }
+/* 時計の巻き戻し検知 */
+function checkClock() {
+  let seen = 0; try { seen = +localStorage.getItem(SEEN_KEY) || 0; } catch {}
+  const now = Date.now();
+  if (seen && now < seen - 10 * 60000) { addFlag("tamper", `端末の時計が${dur(seen - now)}戻されていました`); save("時計の巻き戻しを検知", true); toast("端末の時計が戻されていたため、罰ポイントを付けました"); }
+  try { if (now > seen || now < seen - 10 * 60000) localStorage.setItem(SEEN_KEY, String(now)); } catch {}
+}
+/* ルールを甘くする変更は24時間後に適用する */
+function schedule(label, kind, data) {
+  D.pending.push({ id: rid(), at: Date.now() + DELAY_MS, label, kind, data });
+  save("猶予に登録: " + label); render();
+  toast(`「${label}」はルールを甘くする変更なので、24時間後に有効になります`);
+}
+function applyChange(c) {
+  const d = c.data;
+  if (c.kind === "cfg") Object.assign(D.cfg, d);
+  else if (c.kind === "pen") Object.assign(D.penalty, d);
+  else if (c.kind === "pts") { D.penalty.ptsHist.push({ from: ymd(new Date(c.at)), pts: d }); D.penalty.ptsHist.sort((a, b) => a.from.localeCompare(b.from)); }
+  else if (c.kind === "place") Object.assign(D.places[d.key], d.val);
+  else if (c.kind === "ttDel") delete D.tt[d.key];
+  else if (c.kind === "subDel") { D.subjects = D.subjects.filter(x => x.id !== d.id); for (const k in D.tt) if (D.tt[k] === d.id) delete D.tt[k]; }
+  else if (c.kind === "syncOff") { Object.assign(SY, { token:"", sha:null, lastHash:"", lastPush:0, advice:null, err:"" }); saveSync(); }
+  else if (c.kind === "wipe") { const g = D.guard, f = D.flags; D = blank(); D.guard = g; D.flags = f; photoCache.clear(); idb.clear().catch(() => {}); }
+}
+function applyDuePending() {
+  const now = Date.now(), due = D.pending.filter(c => c.at <= now);
+  if (!due.length) return false;
+  D.pending = D.pending.filter(c => c.at > now);
+  for (const c of due) applyChange(c);
+  save("猶予後に適用: " + due.map(c => c.label).join("、"));
+  return true;
+}
+const pendingOf = kind => D.pending.filter(c => c.kind === kind);
+/* 罰の点数は日付ごと。typeの導入日より前は0点 */
+function ptsAt(date, type) {
+  const def = PEN_TYPES.find(t => t[0] === type);
+  if (def && def[3] && date < def[3]) return 0;
+  const H = D.penalty.ptsHist || [];
+  let cur = H[0];
+  for (const h of H) if (h.from <= date) cur = h;
+  const v = cur && cur.pts[type];
+  return v == null ? (def ? def[2] : 0) : +v;
+}
+function curPts() { const o = {}; for (const [k] of PEN_TYPES) o[k] = ptsAt(today(), k); return o; }
+/* 登録から10分以上たった記録を消すと罰 */
+function deletionFlag(createdTs, what) {
+  if (createdTs && Date.now() - createdTs < FREE_DELETE_MS) return false;
+  addFlag("delete", what); return true;
+}
 
 /* ---------- 小物 ---------- */
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -583,7 +705,8 @@ function currentPeriod() {
 function penaltyEvents() {
   const P = D.penalty; if (!P.on) return [];
   const ev = [], now = Date.now(), since = P.since || today(), sinceMs = parseD(since).getTime();
-  const add = (date, type, detail) => { const pts = +P.pts[type] || 0; if (pts) ev.push({ date, type, detail, pts }); };
+  const add = (date, type, detail) => { const pts = ptsAt(date, type); if (pts) ev.push({ date, type, detail, pts }); };
+  for (const f of D.flags || []) add(f.date, f.type, f.detail);   // 不正の検知は「数え始める日」より前でも数える
   for (const l of D.logs) if (l.date >= since) {
     if (l.status === "late" || l.status === "early" || l.status === "absent") add(l.date, l.status, subjName(l.subjectId) + (l.period ? ` ${l.period}限` : ""));
   }
@@ -607,7 +730,7 @@ function penaltyEvents() {
     const due = fromLocalInput(k.due); if (!due || ymd(new Date(due)) < since) continue;
     const name = `${k.subjectId ? subjName(k.subjectId) + "：" : ""}${k.title}`;
     if (k.done) { if (k.done > due) add(ymd(new Date(k.done)), "latesub", name); }
-    else if (now > due) add(ymd(new Date(due)), "overdue", name);
+    else if ((k.deleted || now) > due) add(ymd(new Date(due)), "overdue", name + (k.deleted ? "（削除済み）" : ""));
   }
   const goal = +D.cfg.weekGoal || 0;
   for (let w = weekStartOf(sinceMs); addDays(w, 7) <= now; w = addDays(w, 7)) {
@@ -654,8 +777,9 @@ const LV = { ok:["余裕あり","ok"], warn:["注意","warn"], crit:["危険","c
 
 /* ---------- 描画 ---------- */
 function render() {
+  D.penalty.pts = curPts();   // 表示用（罰の計算は ptsAt で日付ごとに行う）
   const ps = penaltyState();
-  renderNotes(ps); renderTodo(ps); renderAdvice(); renderTasks(); renderPunch(); renderWeek(); renderSessions(); renderClass(); renderPen(ps); renderSummary(); renderSettings(); tick(); fillPhotos();
+  renderNotes(ps); renderTodo(ps); renderAdvice(); renderTasks(); renderPunch(); renderWeek(); renderSessions(); renderClass(); renderPen(ps); renderSummary(); renderSettings(); renderGuard(); tick(); fillPhotos();
 }
 function renderNotes(ps) {
   $("secureNote").hidden = !!(window.isSecureContext && navigator.geolocation);
@@ -820,7 +944,7 @@ function renderClass() {
   }).join("") : `<p class="empty">まだ記録がありません</p>`;
 }
 /* ---------- 課題 ---------- */
-const openTasks = () => D.tasks.filter(k => !k.done).sort((a, b) => (a.due || "").localeCompare(b.due || ""));
+const openTasks = () => D.tasks.filter(k => !k.done && !k.deleted).sort((a, b) => (a.due || "").localeCompare(b.due || ""));
 function dueText(k) {
   const due = fromLocalInput(k.due), left = due - Date.now();
   if (left < 0) return [`期限切れ（${dur(-left)}超過）`, "crit"];
@@ -855,7 +979,7 @@ function renderTasks() {
     </div>`;
   };
   $("taskOpen").innerHTML = open.length ? open.map(row).join("") : `<p class="empty">未提出の課題はありません。出たらすぐ上で登録してください</p>`;
-  const done = D.tasks.filter(k => k.done).sort((a, b) => b.done - a.done).slice(0, 20);
+  const done = D.tasks.filter(k => k.done && !k.deleted).sort((a, b) => b.done - a.done).slice(0, 20);
   $("taskDone").innerHTML = done.length ? done.map(row).join("") : `<p class="empty">まだありません</p>`;
 }
 function renderPen(ps) {
@@ -882,7 +1006,7 @@ function renderPen(ps) {
   $("penList").innerHTML = rows.length ? rows.map(r => `<div class="row"><span class="date">${mdStr(r.date)}</span>${r.html}</div>`).join("") : `<p class="empty">${P.on ? "まだ違反はありません" : "罰制度はオフです"}</p>`;
   if (!dirty.pen) {
     $("pOn").checked = !!P.on; $("pSince").value = P.since || today(); $("pTh").value = P.threshold;
-    $("ptsGrid").innerHTML = PEN_TYPES.map(([k, l]) => `<label for="pp-${k}">${l}</label><input type="number" id="pp-${k}" min="-20" max="20" value="${P.pts[k]}">`).join("");
+    $("ptsGrid").innerHTML = PEN_TYPES.map(([k, l]) => `<label for="pp-${k}">${l}</label><input type="number" id="pp-${k}" min="-20" max="20" value="${ptsAt(today(), k)}">`).join("");
   }
 }
 function renderSummary() {
@@ -899,6 +1023,14 @@ function renderSummary() {
     + (D.subjects.length ? D.subjects.map(s => { const t = tally(s), [lab, cls] = LV[t.lv];
       return `<tr><td>${esc(s.name)}</td><td class="n">${t.pres}</td><td class="n">${t.ab}</td><td class="n">${t.late}</td><td class="n">${t.off}</td><td class="n">${t.total} / ${t.limit}</td><td><span class="pill ${cls}">${lab}</span></td></tr>`; }).join("")
       : `<tr><td colspan="7" class="muted">科目を登録すると表示されます</td></tr>`) + `</tbody>`;
+}
+function renderGuard() {
+  const tam = (D.flags || []).filter(f => f.type === "tamper"), del = (D.flags || []).filter(f => f.type === "delete");
+  $("guardPill").innerHTML = tam.length ? `<span class="pill crit">改ざん検知 ${tam.length}件</span>` : `<span class="pill ok">異常なし</span>`;
+  const last = A.entries[A.entries.length - 1];
+  $("guardInfo").innerHTML = `<span class="muted">監査ログ ${A.len}件${last ? `・最後の記録 ${md(last.t)} ${hm(last.t)}` : ""}・削除による罰 ${del.length}件</span>`
+    + (tam.length ? `<div class="gpsmsg crit" style="margin-top:8px">${tam.slice(-3).map(f => `${mdStr(f.date)}：${esc(f.detail)}`).join("<br>")}</div>` : "");
+  $("pendList").innerHTML = D.pending.length ? `<div class="lab muted small" style="margin:6px 0 2px;font-weight:700">猶予中の変更</div>` + D.pending.slice().sort((a, b) => a.at - b.at).map(c => `<div class="row"><span class="date">${md(c.at)}<br>${hm(c.at)}</span><div class="main"><b>${esc(c.label)}</b><span class="muted small">あと${dur(c.at - Date.now())}で有効</span></div><div><button class="btn link sm" data-act="pend-cancel" data-id="${c.id}">取り消す</button></div></div>`).join("") : "";
 }
 function renderSettings() {
   $("places").innerHTML = Object.entries(D.places).map(([k, p]) => {
@@ -1083,9 +1215,10 @@ async function placeHere(key) {
   busy = "place-" + key; render();
   try {
     const pos = await getPos(), p = D.places[key];
-    Object.assign(p, { lat: pos.coords.latitude, lon: pos.coords.longitude, acc: Math.round(pos.coords.accuracy), preset: false });
-    if (key === "lab" && p.radius > 150) p.radius = 100;
-    save();
+    const val = { lat: pos.coords.latitude, lon: pos.coords.longitude, acc: Math.round(pos.coords.accuracy), preset: false };
+    if (key === "lab" && p.radius > 150) val.radius = 100;
+    if (p.lat != null && !(key === "lab" && p.preset)) { busy = false; schedule(`${p.name}の場所を登録し直す`, "place", { key, val }); return; }
+    Object.assign(p, val); save(`${p.name}の場所を登録`);
     toast(p.acc > 50 ? `登録しましたが誤差が±${p.acc}mあります。屋外でもう一度登録すると正確になります` : `${p.name}を登録しました（誤差±${p.acc}m）`);
   } catch (e) { toast(e.msg); }
   busy = false; render();
@@ -1117,25 +1250,35 @@ document.addEventListener("click", e => {
   if (a === "lb-close") { $("lightbox").hidden = true; $("lbImg").removeAttribute("src"); return; }
   if (a === "cancel-out") { pendingOut = null; render(); return; }
   if (a === "slot") { if (!busy) recordClass({ subjectId: b.dataset.subject, status: b.dataset.st, period: b.dataset.period, hours: 2 }, $("todoMsg"), "slot"); return; }
-  if (a === "offday") { const d = today(); D.offDays = isOff(d) ? D.offDays.filter(x => x !== d) : [...D.offDays, d]; save(); render(); toast(isOff(d) ? "今日を休みの日にしました" : "休みを取り消しました"); return; }
+  if (a === "offday") {
+    const d = today();
+    if (isOff(d)) { D.offDays = D.offDays.filter(x => x !== d); save("休みの日を取り消し"); render(); toast("休みを取り消しました"); return; }
+    const first = slotsOn(d)[0], limit = first ? first.start : D.cfg.roboDays.includes(new Date().getDay()) ? at(d, D.cfg.roboStart) : Infinity;
+    if (Date.now() > limit) return toast(`休みの日にできるのは、その日の最初の予定（${hm(limit)}）が始まる前までです`);
+    const ym = d.slice(0, 7), used = D.offDays.filter(x => x.startsWith(ym)).length;
+    if (used >= 3) return toast("休みの日にできるのは月に3日までです。休講は授業ごとに記録してください");
+    D.offDays = [...D.offDays, d]; save("今日を休みの日に"); render(); toast(`今日を休みの日にしました（今月${used + 1}/3日）`); return;
+  }
   if (a === "sess-new") { const n = Date.now(); editing = "new"; draft = { start: toLocalInput(n - 3600000), end: toLocalInput(n), note: "" }; setTab("punch"); renderSessions(); return; }
   if (a === "sess-edit") { const s = D.sessions.find(x => x.id === id); if (!s) return; editing = id; draft = { start: toLocalInput(s.start), end: s.end ? toLocalInput(s.end) : "", note: s.note || "" }; armed = null; renderSessions(); return; }
   if (a === "sess-cancel") { editing = null; draft = null; renderSessions(); fillPhotos(); return; }
-  if (a === "sess-del") { if (armed !== "s:" + id) return arm("s:" + id); armed = null; editing = null; { const s0 = D.sessions.find(s => s.id === id); if (s0) dropPhotos(s0.inPhoto, s0.outPhoto); } D.sessions = D.sessions.filter(s => s.id !== id); save(); render(); toast("削除しました"); return; }
-  if (a === "log-del") { if (armed !== "l:" + id) return arm("l:" + id); armed = null; { const l0 = D.logs.find(l => l.id === id); if (l0) dropPhotos(l0.photo); } D.logs = D.logs.filter(l => l.id !== id); save(); render(); toast("削除しました"); return; }
-  if (a === "sub-del") { if (armed !== "u:" + id) return arm("u:" + id); armed = null; D.subjects = D.subjects.filter(s => s.id !== id); for (const k in D.tt) if (D.tt[k] === id) delete D.tt[k]; save(); render(); toast("科目を削除しました"); return; }
-  if (a === "pay") { if (armed !== "pay:" + id) return arm("pay:" + id); armed = null; const m = D.penalty.menu.find(x => x.id === id); if (m) { D.penalty.paid.push({ id: rid(), ts: Date.now(), name: m.name, cost: m.cost }); save(); render(); toast(`「${m.name}」を実行して ${m.cost}点 清算しました`); } return; }
+  if (a === "sess-del") { if (armed !== "s:" + id) return arm("s:" + id); armed = null; editing = null; const s0 = D.sessions.find(s => s.id === id); if (!s0) return; const pen = deletionFlag(s0.created || s0.start, `入退室 ${md(s0.start)} ${hm(s0.start)}`); dropPhotos(s0.inPhoto, s0.outPhoto); D.sessions = D.sessions.filter(s => s.id !== id); save("入退室の記録を削除"); render(); toast(pen ? `削除しました（登録から10分以上たっているので +${ptsAt(today(), "delete")}点）` : "削除しました"); return; }
+  if (a === "log-del") { if (armed !== "l:" + id) return arm("l:" + id); armed = null; const l0 = D.logs.find(l => l.id === id); if (!l0) return; const pen = deletionFlag(l0.ts, `授業 ${l0.date} ${subjName(l0.subjectId)} ${ST[l0.status][0]}`); dropPhotos(l0.photo); D.logs = D.logs.filter(l => l.id !== id); save("授業の記録を削除"); render(); toast(pen ? `削除しました（登録から10分以上たっているので +${ptsAt(today(), "delete")}点）` : "削除しました"); return; }
+  if (a === "sub-del") { if (armed !== "u:" + id) return arm("u:" + id); armed = null; return schedule(`科目「${subjName(id)}」を削除`, "subDel", { id }); }
+  if (a === "pay") { if (armed !== "pay:" + id) return arm("pay:" + id); armed = null; const m = D.penalty.menu.find(x => x.id === id); if (m) { D.penalty.paid.push({ id: rid(), ts: Date.now(), name: m.name, cost: m.cost }); save(`罰を実行: ${m.name}`); render(); toast(`「${m.name}」を実行して ${m.cost}点 清算しました`); } return; }
   if (a === "menu-del") { if (armed !== "menu:" + id) return arm("menu:" + id); armed = null; D.penalty.menu = D.penalty.menu.filter(m => m.id !== id); save(); render(); return; }
-  if (a === "preset") return applyPreset();
+  if (a === "preset") return applyPreset(false);
   if (a === "task-done") { const k = D.tasks.find(x => x.id === id); if (k) { k.done = Date.now(); save(); render(); toast(k.done > fromLocalInput(k.due) ? `提出を記録しました（遅れ提出 +${D.penalty.pts.latesub || 0}点）` : "提出を記録しました。おつかれさま"); } return; }
-  if (a === "task-undo") { const k = D.tasks.find(x => x.id === id); if (k) { k.done = null; save(); render(); } return; }
-  if (a === "task-del") { if (armed !== "k:" + id) return arm("k:" + id); armed = null; D.tasks = D.tasks.filter(x => x.id !== id); save(); render(); toast("課題を削除しました"); return; }
+  if (a === "task-undo") { const k = D.tasks.find(x => x.id === id); if (k) { k.done = null; save("課題を未提出に戻す"); render(); } return; }
+  if (a === "task-del") { if (armed !== "k:" + id) return arm("k:" + id); armed = null; const k = D.tasks.find(x => x.id === id); if (!k) return;
+    if (k.created && Date.now() - k.created < FREE_DELETE_MS) D.tasks = D.tasks.filter(x => x.id !== id); else { k.deleted = Date.now(); if (!k.done) deletionFlag(k.created, `課題「${k.title}」`); }
+    save("課題を削除"); render(); toast(k.deleted && !k.done ? `削除しました（+${ptsAt(today(), "delete")}点。締切を過ぎていれば期限切れの判定も残ります）` : "課題を削除しました"); return; }
   if (a === "due-next") { const sid = $("kSubj").value, t = sid && nextClassStart(sid); if (!t) return toast(sid ? "時間割にこの科目の授業が見つかりません" : "科目を選んでください"); $("kDue").value = toLocalInput(t); return; }
   if (a === "due-tonight") { $("kDue").value = `${today()}T23:59`; return; }
   if (a === "due-week") { $("kDue").value = `${ymd(new Date(addDays(dayStart(), 7)))}T23:59`; return; }
   if (a === "advice-toggle") { const ca = SY.advice, fresh = ca && Date.now() - (Date.parse(ca.generatedAt) || 0) < 14 * 3600000; const cur = adviceView || (fresh ? "claude" : "app"); adviceView = cur === "claude" ? "app" : "claude"; renderAdvice(); return; }
   if (a === "sync-now") { SY.err = ""; pushRecords(true).then(fetchAdvice); return; }
-  if (a === "sync-off") { if (armed !== "syncoff") return arm("syncoff"); armed = null; Object.assign(SY, { token:"", sha:null, lastHash:"", lastPush:0, advice:null, err:"" }); saveSync(); $("syToken").value = ""; renderSync(); renderAdvice(); toast("Claude連携を解除しました"); return; }
+  if (a === "sync-off") { if (armed !== "syncoff") return arm("syncoff"); armed = null; return schedule("Claude連携を解除", "syncOff", {}); }
   if (a === "place-here") return placeHere(b.dataset.key);
   if (a === "csv-robo" || a === "csv-class") return exportCsv(a.slice(4));
   if (a === "backup") {
@@ -1146,7 +1289,8 @@ document.addEventListener("click", e => {
     });
     return;
   }
-  if (a === "wipe") { if (armed !== "wipe") return arm("wipe"); armed = null; D = blank(); save(); photoCache.clear(); idb.clear().catch(() => {}); render(); toast("すべての記録を消しました"); return; }
+  if (a === "wipe") { if (armed !== "wipe") return arm("wipe"); armed = null; return schedule("すべての記録を消す", "wipe", {}); }
+  if (a === "pend-cancel") { const c = D.pending.find(x => x.id === id); D.pending = D.pending.filter(x => x.id !== id); save("猶予中の変更を取り消し: " + (c ? c.label : "")); render(); toast("取り消しました"); return; }
 });
 document.addEventListener("input", e => {
   const t = e.target, id = t.id || "";
@@ -1163,15 +1307,20 @@ document.addEventListener("change", e => {
   const t = e.target;
   if (t.name === "cst") { $("classMsg").hidden = true; renderClass(); }
   if (t.id === "cPeriod") t.dataset.touched = "1";
-  if (t.dataset.tt) { if (t.value) D.tt[t.dataset.tt] = t.value; else delete D.tt[t.dataset.tt]; save(); render(); toast("時間割を保存しました"); }
-  if (t.dataset.pt) { const [i, j] = t.dataset.pt.split("-").map(Number); if (t.value) { D.cfg.periods[i][j] = t.value; save(); render(); } }
+  if (t.dataset.tt) {
+    const key = t.dataset.tt, [w, pd] = key.split("-");
+    if (t.value) { D.tt[key] = t.value; save("時間割を変更"); render(); toast("時間割を保存しました"); }
+    else if (D.tt[key]) { schedule(`時間割から${WD[+w]}${pd}限を外す`, "ttDel", { key }); }
+  }
+  if (t.dataset.pt) { const [i, j] = t.dataset.pt.split("-").map(Number); if (t.value && t.value !== D.cfg.periods[i][j]) { const np = JSON.parse(JSON.stringify(D.cfg.periods)); np[i][j] = t.value; schedule(`${i + 1}限の時刻を ${np[i][0]}〜${np[i][1]} に変更`, "cfg", { periods: np }); } }
   if (t.id === "restoreFile") {
     const f = t.files[0]; if (!f) return;
     f.text().then(txt => {
       const x = JSON.parse(txt);
       if (!x || !Array.isArray(x.sessions) || !Array.isArray(x.logs)) throw 0;
+      if (D.sessions.length || D.logs.length || D.tasks.length) { toast("記録がある状態では戻せません（記録の巻き戻し防止）。機種変更などで空の状態のときに使ってください"); return; }
       const photos = x.photos || {}; delete x.photos;
-      D = normalize(x); save();
+      const g = D.guard, fl = D.flags; D = normalize(x); D.guard = g; D.flags = [...fl, ...(D.flags || [])]; save("バックアップから復元");
       Promise.all(Object.entries(photos).map(([k, v]) => idb.put(k, v).catch(() => {}))).then(() => { photoCache.clear(); render(); });
       toast("バックアップから戻しました");
     }).catch(() => toast("このファイルは読み込めませんでした。書き出したバックアップ（.json）を選んでください"));
@@ -1187,11 +1336,13 @@ document.addEventListener("submit", e => {
     if (end && end <= start) return toast("退室時刻は入室時刻より後にしてください");
     const others = D.sessions.filter(s => !s.end && s.id !== editing).length;
     if (!end && others) return toast("作業中の記録がすでにあります。退室時刻を入れてください");
-    if (editing === "new") D.sessions.push({ id: rid(), start, end: end || null, note: draft.note.trim(), inGeo: null, outGeo: null });
+    if (editing === "new") D.sessions.push({ id: rid(), start, end: end || null, note: draft.note.trim(), inGeo: null, outGeo: null, created: Date.now() });
     else { const s = D.sessions.find(x => x.id === editing); if (s) { if (s.start !== start || (s.end || null) !== (end || null)) s.edited = true; Object.assign(s, { start, end: end || null, note: draft.note.trim() }); } }
     save(); editing = null; draft = null; render(); toast("保存しました"); return;
   }
-  if (f.dataset.form === "place") { const k = f.dataset.key; D.places[k].radius = Math.max(20, Math.min(2000, +$("pr-" + k).value || 100)); delete placeDraft[k]; save(); render(); toast("半径を保存しました"); return; }
+  if (f.dataset.form === "place") { const k = f.dataset.key, r = Math.max(20, Math.min(2000, +$("pr-" + k).value || 100)); delete placeDraft[k];
+    if (r > D.places[k].radius) return schedule(`${D.places[k].name}の半径を${r}mに広げる`, "place", { key: k, val: { radius: r } });
+    D.places[k].radius = r; save("半径を狭める"); render(); toast("半径を保存しました"); return; }
   if (f.id === "classForm") {
     const subjectId = $("cSubj").value; if (!subjectId) return toast("先に設定タブで科目を登録してください");
     if (busy) return;
@@ -1209,15 +1360,14 @@ document.addEventListener("submit", e => {
     pushRecords(true).then(() => { if (!SY.err) { toast("接続できました。記録を送りました"); fetchAdvice(); } });
     return;
   }
-  if (f.id === "geoForm") { D.cfg.maxAcc = Math.max(10, Math.min(500, +$("gAcc").value || 100)); D.cfg.photo = $("gPhoto").checked; dirty.acc = false; save(); render(); toast("保存しました"); return; }
-  if (f.id === "graceForm") { D.cfg.grace = Math.max(0, Math.min(90, +$("gGrace").value || 0)); dirty.grace = false; save(); render(); toast("保存しました"); return; }
+  if (f.id === "geoForm") { tightLoose("位置・写真の設定", { maxAcc: Math.max(10, Math.min(500, +$("gAcc").value || 100)), photo: $("gPhoto").checked }); dirty.acc = false; return; }
+  if (f.id === "graceForm") { tightLoose("催促までの時間", { grace: Math.max(0, Math.min(90, +$("gGrace").value || 0)) }); dirty.grace = false; return; }
   if (f.id === "subForm") { const name = $("sName").value.trim(); if (!name) return; D.subjects.push({ id: rid(), name, hours: Math.max(1, +$("sHours").value || 60) }); save(); $("sName").value = ""; render(); toast(`${name} を追加しました。時間割にも入れてください`); return; }
   if (f.id === "roboForm") {
-    D.cfg.roboDays = [...document.querySelectorAll("#roboDays input:checked")].map(x => +x.value);
-    D.cfg.roboStart = $("rStart").value || "18:00"; D.cfg.roboEnd = $("rEnd").value || "20:00"; D.cfg.weekGoal = Math.max(0, +$("rGoal").value || 0);
-    dirty.robo = false; save(); render(); toast("保存しました"); return;
+    tightLoose("ロボコン活動の設定", { roboDays: [...document.querySelectorAll("#roboDays input:checked")].map(x => +x.value), roboStart: $("rStart").value || "18:00", roboEnd: $("rEnd").value || "20:00", weekGoal: Math.max(0, +$("rGoal").value || 0) });
+    dirty.robo = false; return;
   }
-  if (f.id === "ruleForm") { Object.assign(D.cfg, { limitDen: Math.max(2, Math.min(10, +$("rDen").value || 3)), lateUnit: Math.max(1, Math.min(10, +$("rLate").value || 3)), officialCounts: $("rOff").checked }); dirty.rule = false; save(); render(); toast("ルールを保存しました"); return; }
+  if (f.id === "ruleForm") { tightLoose("欠課のルール", { limitDen: Math.max(2, Math.min(10, +$("rDen").value || 3)), lateUnit: Math.max(1, Math.min(10, +$("rLate").value || 3)), officialCounts: $("rOff").checked }); dirty.rule = false; return; }
   if (f.id === "taskForm") {
     const title = $("kTitle").value.trim(), due = $("kDue").value;
     if (!title || !due) return toast("課題の内容と締切を入れてください");
@@ -1228,11 +1378,45 @@ document.addEventListener("submit", e => {
   }
   if (f.id === "menuForm") { const name = $("mName").value.trim(); if (!name) return; D.penalty.menu.push({ id: rid(), name, cost: Math.max(1, Math.min(100, +$("mCost").value || 3)) }); $("mName").value = ""; save(); render(); toast("罰メニューに追加しました"); return; }
   if (f.id === "penForm") {
-    const P = D.penalty; P.on = $("pOn").checked; P.since = $("pSince").value || today(); P.threshold = Math.max(1, Math.min(100, +$("pTh").value || 10));
-    for (const [k] of PEN_TYPES) { const v = $("pp-" + k); if (v) P.pts[k] = Math.max(-20, Math.min(20, Math.round(+v.value || 0))); }
-    dirty.pen = false; save(); render(); toast("罰のルールを保存しました");
+    const P = D.penalty, on = $("pOn").checked, since = $("pSince").value || today(), th = Math.max(1, Math.min(100, +$("pTh").value || 10));
+    const cur = curPts(), up = {}, down = {}; let nUp = 0, nDown = 0;
+    for (const [k] of PEN_TYPES) { const v = $("pp-" + k); if (!v) continue; const n = Math.max(-20, Math.min(20, Math.round(+v.value || 0)));
+      if (n > cur[k]) { up[k] = n; nUp++; } else if (n < cur[k]) { down[k] = n; nDown++; } }
+    const loose = [];
+    if (nUp) { P.ptsHist.push({ from: today(), pts: { ...cur, ...up } }); P.ptsHist.sort((a, b) => a.from.localeCompare(b.from)); }
+    if (on && !P.on) P.on = true; else if (!on && P.on) loose.push(["罰制度をオフにする", "pen", { on: false }]);
+    if (th < P.threshold) P.threshold = th; else if (th > P.threshold) loose.push([`罰の基準を${th}点に上げる`, "pen", { threshold: th }]);
+    if (since < P.since) P.since = since; else if (since > P.since) loose.push([`罰を数え始める日を${since}にする`, "pen", { since }]);
+    if (nDown) loose.push([`罰の点数を下げる（${Object.keys(down).map(penLabel).join("・")}）`, "pts", { ...cur, ...up, ...down }]);
+    dirty.pen = false;
+    save("罰のルールを厳しくする"); 
+    for (const [label, kind, data] of loose) D.pending.push({ id: rid(), at: Date.now() + DELAY_MS, label, kind, data });
+    if (loose.length) { save("猶予に登録: " + loose.map(x => x[0]).join("、")); toast("厳しくする変更はすぐ、甘くする変更は24時間後に有効になります"); } else toast("罰のルールを保存しました");
+    render();
   }
 });
+
+/* 設定の変更を「厳しくなる部分はすぐ・甘くなる部分は24時間後」に分ける */
+function isLooser(k, nv, ov) {
+  switch (k) {
+    case "maxAcc": case "grace": case "lateUnit": case "roboStart": return nv > ov;
+    case "limitDen": case "weekGoal": case "roboEnd": return nv < ov;
+    case "photo": case "officialCounts": return ov && !nv;
+    case "roboDays": return ov.some(x => !nv.includes(x));
+    default: return JSON.stringify(nv) !== JSON.stringify(ov);
+  }
+}
+function tightLoose(label, next) {
+  const tight = {}, loose = {};
+  for (const [k, v] of Object.entries(next)) {
+    const ov = D.cfg[k]; if (JSON.stringify(v) === JSON.stringify(ov)) continue;
+    if (k === "roboDays") { const add = v.filter(x => !ov.includes(x)); if (add.length) tight.roboDays = [...ov, ...add]; if (isLooser(k, v, ov)) loose.roboDays = v; continue; }
+    (isLooser(k, v, ov) ? loose : tight)[k] = v;
+  }
+  if (Object.keys(tight).length) { Object.assign(D.cfg, tight); save(label + "（厳しくする）"); }
+  if (Object.keys(loose).length) schedule(label + "を甘くする", "cfg", loose);
+  else { render(); toast(Object.keys(tight).length ? "保存しました" : "変更はありません"); }
+}
 
 /* ---------- 時間割の読み込み（月〜金）---------- */
 const PRESET = [
@@ -1242,14 +1426,14 @@ const PRESET = [
   [4,2,"基礎ロボット工学",30],[4,3,"線形代数Ⅱ",30],[4,4,"確率統計",30],[4,5,"心理学",30],
   [5,1,"日本語実践",30],[5,2,"情報システム工学概論",30],[5,4,"システム制御工学Ⅰ",30]
 ];
-function applyPreset() {
+function applyPreset(auto) {
   let added = 0;
   for (const [wd, p, name, hours] of PRESET) {
     let s = D.subjects.find(x => x.name === name);
     if (!s) { s = { id: rid(), name, hours }; D.subjects.push(s); added++; }
     D.tt[`${wd}-${p}`] = s.id;
   }
-  save(); render();
+  save(auto ? "アプリ: 時間割を読み込み" : "時間割を読み込み直す", !!auto); render();
   toast(`時間割を読み込みました（${added}科目を追加）`);
 }
 
@@ -1291,10 +1475,13 @@ function exportPayload() {
     sessions: D.sessions.slice(-300).map(s => ({ start: toLocalInput(s.start), end: s.end ? toLocalInput(s.end) : null, verified: verified(s), edited: !!s.edited, inGeo: stripGeo(s.inGeo), outGeo: stripGeo(s.outGeo), photo: !!(s.inPhoto || s.outPhoto), note: s.note || "" })),
     classLogs: D.logs.slice(-500).map(l => ({ date: l.date, period: l.period, subject: subjName(l.subjectId), status: ST[l.status][0], hours: l.hours || 0, geo: stripGeo(l.geo), photo: !!l.photo, note: l.note || "" })),
     offDays: D.offDays.slice(-60),
-    tasks: D.tasks.slice(-100).map(k => ({ subject: k.subjectId ? subjName(k.subjectId) : "", title: k.title, due: k.due, done: k.done ? toLocalInput(k.done) : null }))
+    tasks: D.tasks.filter(k => !k.deleted).slice(-100).map(k => ({ subject: k.subjectId ? subjName(k.subjectId) : "", title: k.title, due: k.due, done: k.done ? toLocalInput(k.done) : null }))
   };
   const la = localAdvice(); summary.appAdvice = { headline: la.headline, items: la.items.map(x => x.text), plan: la.plan };
-  return { app: "kintai", schema: 1, timezone: "Asia/Tokyo", summary, data };
+  summary.integrity = { flags: (D.flags || []).slice(-10).map(f => ({ date: f.date, type: penLabel(f.type), detail: f.detail })), pending: D.pending.map(c => ({ label: c.label, at: toLocalInput(c.at) })),
+    offDaysThisMonth: D.offDays.filter(x => x.startsWith(today().slice(0, 7))).length, cancelsLast30d: D.logs.filter(l => l.status === "cancel" && Date.now() - l.ts < 30 * 864e5).length };
+  const audit = { ver: A.ver, len: A.len, head: A.head, entries: A.entries.slice(-120).map(e => ({ t: toLocalInput(e.t), a: e.a, sys: e.sys, p: e.p, h: e.h })) };
+  return { app: "kintai", schema: 1, timezone: "Asia/Tokyo", summary, data, audit };
 }
 async function pushRecords(force) {
   if (!SY.token || syncing) return;
@@ -1319,11 +1506,20 @@ async function fetchAdvice() {
   try {
     const r = await gh("advice.json", { headers:{ Accept:"application/vnd.github.raw+json" } });
     if (r.status === 404) SY.advice = null;
-    else if (r.ok) { const j = JSON.parse(await r.text()); if (j && (j.headline || (j.items && j.items.length))) SY.advice = j; }
+    else if (r.ok) { let j = null; try { j = JSON.parse(await r.text()); } catch {} if (j && (j.headline || (j.items && j.items.length))) { SY.advice = j; applyClaudeIntegrity(j); } }
     else throw r;
     SY.adviceAt = Date.now();
   } catch (e) { if (!SY.err) SY.err = await errText(e); }
   adviceBusy = false; saveSync(); renderAdvice(); renderSync();
+}
+/* Claudeが監査ログの巻き戻しを見つけたら、1回だけ罰ポイントを付ける */
+function applyClaudeIntegrity(j) {
+  const it = j.integrity; if (!it || it.ok !== false || !j.generatedAt) return;
+  D.guard = D.guard || {}; D.guard.claudeSeen = D.guard.claudeSeen || [];
+  if (D.guard.claudeSeen.includes(j.generatedAt)) return;
+  D.guard.claudeSeen.push(j.generatedAt);
+  addFlag("tamper", `Claudeの確認：${String(it.reason || "記録の巻き戻し").slice(0, 80)}`);
+  save("Claudeが巻き戻しを検知", true); render();
 }
 function agoText(iso) {
   const t = Date.parse(iso); if (!t) return "";
@@ -1422,10 +1618,19 @@ function renderSync() {
 /* ---------- 起動 ---------- */
 loadSync();
 load();
-if (D.cfg.periods[0] && D.cfg.periods[0][0] === "08:50") { D.cfg.periods = JSON.parse(JSON.stringify(CFG_DEF.periods)); save(); }
-if (!D.places.school.fit) { D.places.school = JSON.parse(JSON.stringify(PLACE_DEF.school)); if (D.places.lab.lat == null) D.places.lab = JSON.parse(JSON.stringify(PLACE_DEF.lab)); save(); }
-if (D.cfg.roboStart === "16:30") { Object.assign(D.cfg, { roboDays:[1,4,5], roboStart:"18:00", roboEnd:"20:00", weekGoal:6 }); save(); }
-if (!D.subjects.length && !Object.keys(D.tt).length) applyPreset();
+{ // 改ざんチェックは移行処理より前に、保存されていたそのままのデータで行う
+  const bad = verifyAtLoad();
+  if (bad) { addFlag("tamper", bad); save("改ざんを検知: " + bad, true); setTimeout(() => toast(`${bad}。罰ポイントを付けました`), 600); }
+}
+if (!D.guard) sysChange("不正対策を開始", () => { D.guard = { since: Date.now() }; });
+if (!D.penalty.ptsHist) sysChange("罰の点数を日付ごとの記録に移行", () => { D.penalty.ptsHist = [{ from: "0000-00-00", pts: { ...D.penalty.pts } }]; });
+if (A.ver !== APP_VERSION) { const old = A.ver; sysChange(`アプリ更新 ${old || "（初回）"} → ${APP_VERSION}`, () => {}); loadAudit(); A.ver = APP_VERSION; try { localStorage.setItem(AUDIT_KEY, JSON.stringify(A)); } catch {} }
+if (D.cfg.periods[0] && D.cfg.periods[0][0] === "08:50") sysChange("授業の時刻を設定", () => { D.cfg.periods = JSON.parse(JSON.stringify(CFG_DEF.periods)); });
+if (!D.places.school.fit) sysChange("学校を福岡工業大学に設定", () => { D.places.school = JSON.parse(JSON.stringify(PLACE_DEF.school)); if (D.places.lab.lat == null) D.places.lab = JSON.parse(JSON.stringify(PLACE_DEF.lab)); });
+if (D.cfg.roboStart === "16:30") sysChange("ロボコンの活動日を設定", () => { Object.assign(D.cfg, { roboDays:[1,4,5], roboStart:"18:00", roboEnd:"20:00", weekGoal:6 }); });
+if (!D.subjects.length && !Object.keys(D.tt).length) applyPreset(true);
+applyDuePending();
+checkClock();
 $("cDate").value = today();
 let t0 = "punch"; try { t0 = sessionStorage.getItem("kintai.tab") || "punch"; } catch {}
 if (Object.values(D.places).some(p => p.lat == null)) t0 = "set";
@@ -1435,8 +1640,9 @@ $("syRepo").value = SY.repo; $("syToken").value = SY.token;
 renderSync(); renderAdvice();
 if (SY.token) { pushRecords(false); fetchAdvice(); }
 setInterval(tick, 1000);
-setInterval(() => { if (!busy && !editing && !document.hidden) { renderTodo(penaltyState()); renderAdvice(); renderTasks(); } }, 60000);
-document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) { punchMsg = null; $("todoMsg").hidden = true; $("classMsg").hidden = true; render(); if (SY.token) { pushRecords(false); if (Date.now() - SY.adviceAt > 120000) fetchAdvice(); } } });
+setInterval(() => { if (!busy && !editing && !document.hidden) { checkClock(); if (applyDuePending()) render(); renderTodo(penaltyState()); renderAdvice(); renderTasks(); renderGuard(); } }, 60000);
+window.addEventListener("storage", e => { if (e.key === KEY && !busy) { load(); render(); } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) { checkClock(); applyDuePending(); punchMsg = null; $("todoMsg").hidden = true; $("classMsg").hidden = true; render(); if (SY.token) { pushRecords(false); if (Date.now() - SY.adviceAt > 120000) fetchAdvice(); } } });
 })();
 </script>
 </body>
