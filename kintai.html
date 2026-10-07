@@ -454,7 +454,13 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
       </div>
     </div>
     <div class="box">
-      <h2>バックアップ</h2>
+      <h2>写真とバックアップ</h2>
+      <form class="form" id="keepForm">
+        <div class="field narrow" style="flex-basis:200px"><label for="kKeep">写真を残す期間</label>
+          <select id="kKeep"><option value="30">30日</option><option value="60">60日</option><option value="90">90日</option><option value="365">1年</option><option value="0">無期限</option></select></div>
+        <button class="btn" type="submit">保存</button>
+      </form>
+      <p class="muted small">期間を過ぎた写真は自動で消します。打刻の記録とGPSの距離は残ります。期間を短くするのは24時間後に有効です。<span id="photoUse"></span></p>
       <p class="muted small">記録はこの端末のブラウザの中だけに保存されます。機種変更やブラウザのデータ消去の前に書き出してください。</p>
       <div class="btnrow">
         <button class="btn" data-act="backup">バックアップを書き出す</button>
@@ -488,7 +494,7 @@ const ST = { present:["出席","ok"], late:["遅刻","warn"], early:["早退","w
 const ONSITE = ["present","late","early"];
 const FIT = { lat:33.695446, lon:130.4395 };   // 福岡工業大学（福岡市東区和白東3-30-1）
 const PLACE_DEF = { school:{ name:"福岡工業大学", lat:FIT.lat, lon:FIT.lon, radius:400, preset:true, fit:true }, lab:{ name:"作業場", lat:FIT.lat, lon:FIT.lon, radius:400, preset:true } };
-const CFG_DEF = { maxAcc:100, photo:true, camFacing:"user", limitDen:3, lateUnit:3, officialCounts:false, grace:15,
+const CFG_DEF = { maxAcc:100, photo:true, photoKeepDays:60, camFacing:"user", limitDen:3, lateUnit:3, officialCounts:false, grace:15,
   periods:[["09:00","10:30"],["10:40","12:10"],["13:00","14:30"],["14:40","16:10"],["16:20","17:50"]],
   roboDays:[1,4,5], roboStart:"18:00", roboEnd:"20:00", weekGoal:6 };
 const PEN_TYPES = [
@@ -547,7 +553,7 @@ function save(action, sys) {
  *  - 機能を変えたら APP_VERSION を上げる（更新の記録が監査ログに1行残る）。
  *  - 監査ログ（kintai.audit）の形式を変えるときも消さずに追記で移行する。長さが減るとClaudeが巻き戻しと判定する。
  */
-const APP_VERSION = "2026.10.07-guard1";
+const APP_VERSION = "2026.10.07-photo2";
 const AUDIT_KEY = "kintai.audit", SEEN_KEY = "kintai.seen", DELAY_MS = 24 * 3600000, FREE_DELETE_MS = 10 * 60000;
 let A = { v:1, len:0, head:"0", ver:"", entries:[] };
 function cyrb53(str, seed = 0) {
@@ -899,7 +905,7 @@ function renderSessions() {
     const long = !s.end && Date.now() - s.start > 14*3600000;
     return `<div class="row">
       <span class="date">${md(s.start)}</span>
-      <div class="main">${s.inPhoto || s.outPhoto ? `<span class="thumbs">${thumb(s.inPhoto, "入室")}${thumb(s.outPhoto, "退室")}</span>` : ""}<span class="mono">${hm(s.start)} → ${s.end ? hm(s.end) : "作業中"}</span>${s.end ? `<span class="muted mono small">${dur(s.end - s.start)}</span>` : long ? `<span class="pill crit">退室し忘れ？</span>` : ""}${sessBadges(s)}</div>
+      <div class="main">${s.inPhoto || s.outPhoto ? `<span class="thumbs">${thumb(s.inPhoto, "入室")}${thumb(s.outPhoto, "退室")}</span>` : s.photoPurged ? thumb(null, "", true) : ""}<span class="mono">${hm(s.start)} → ${s.end ? hm(s.end) : "作業中"}</span>${s.end ? `<span class="muted mono small">${dur(s.end - s.start)}</span>` : long ? `<span class="pill crit">退室し忘れ？</span>` : ""}${sessBadges(s)}</div>
       <div><button class="btn link sm" data-act="sess-edit" data-id="${s.id}">編集</button></div>
       ${s.note ? `<div class="note">${esc(s.note)}</div>` : ""}
       ${editing === s.id ? sessEditor(s) : ""}
@@ -938,7 +944,7 @@ function renderClass() {
     const [lab, cls] = ST[l.status] || ["?","off"];
     const badge = ONSITE.includes(l.status) ? (l.geo ? `<span class="pill ok" title="${geoText(l.geo)}">位置確認済み</span>` : `<span class="pill off">手動</span>`) : "";
     return `<div class="row"><span class="date">${mdStr(l.date)}</span>
-      <div class="main">${thumb(l.photo, "授業")}${l.period ? `<span class="mono small muted">${l.period}限</span>` : ""}<b>${esc(subjName(l.subjectId))}</b><span class="pill ${cls}">${lab}</span>${l.ts && ONSITE.includes(l.status) ? `<span class="mono small muted">${hm(l.ts)}</span>` : ""}${l.status === "absent" || l.status === "official" ? `<span class="mono small">${l.hours}時間</span>` : ""}${badge}</div>
+      <div class="main">${thumb(l.photo, "授業", l.photoPurged)}${l.period ? `<span class="mono small muted">${l.period}限</span>` : ""}<b>${esc(subjName(l.subjectId))}</b><span class="pill ${cls}">${lab}</span>${l.ts && ONSITE.includes(l.status) ? `<span class="mono small muted">${hm(l.ts)}</span>` : ""}${l.status === "absent" || l.status === "official" ? `<span class="mono small">${l.hours}時間</span>` : ""}${badge}</div>
       <div>${delBtn("l:" + l.id, "log-del", l.id)}</div>
       ${l.note ? `<div class="note">${esc(l.note)}</div>` : ""}</div>`;
   }).join("") : `<p class="empty">まだ記録がありません</p>`;
@@ -1033,6 +1039,8 @@ function renderGuard() {
   $("pendList").innerHTML = D.pending.length ? `<div class="lab muted small" style="margin:6px 0 2px;font-weight:700">猶予中の変更</div>` + D.pending.slice().sort((a, b) => a.at - b.at).map(c => `<div class="row"><span class="date">${md(c.at)}<br>${hm(c.at)}</span><div class="main"><b>${esc(c.label)}</b><span class="muted small">あと${dur(c.at - Date.now())}で有効</span></div><div><button class="btn link sm" data-act="pend-cancel" data-id="${c.id}">取り消す</button></div></div>`).join("") : "";
 }
 function renderSettings() {
+  if (!dirty.keep) $("kKeep").value = String(D.cfg.photoKeepDays ?? 60);
+  if (Date.now() - usageAt > 30000) { usageAt = Date.now(); photoUsage().then(u => { $("photoUse").textContent = `いま保存している写真：${u.n}枚・約${u.mb >= 1 ? u.mb.toFixed(1) + "MB" : Math.max(1, Math.round(u.mb * 1024)) + "KB"}`; }); }
   $("places").innerHTML = Object.entries(D.places).map(([k, p]) => {
     const d = placeDraft[k] || {};
     return `<div class="place">
@@ -1073,6 +1081,7 @@ function setTab(t) {
   tab = t;
   for (const k of ["punch","class","task","pen","sum","set"]) { $("p-" + k).hidden = k !== t; $("t-" + k).setAttribute("aria-selected", k === t); }
   try { sessionStorage.setItem("kintai.tab", t); } catch {}
+  if (t === "set" && D) { usageAt = 0; renderSettings(); }
   window.scrollTo(0, 0);
 }
 
@@ -1093,21 +1102,57 @@ const idb = (() => {
     keys: () => tx("readonly", st => st.getAllKeys()), clear: () => tx("readwrite", st => st.clear()) };
 })();
 const photoCache = new Map();
+/* 写真は Blob で保存する（文字列の data URL より約25%小さい）。古い版の data URL もそのまま読める */
+function dataUrlToBlob(u) {
+  const [head, b64] = u.split(","), mime = (head.match(/data:([^;]+)/) || [, "image/jpeg"])[1];
+  const bin = atob(b64), arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+const blobToDataUrl = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
+const photoUrl = v => typeof v === "string" ? v : URL.createObjectURL(v);
 async function savePhoto(dataUrl) {
   if (!dataUrl) return null;
   const id = "ph" + rid();
-  try { await idb.put(id, dataUrl); photoCache.set(id, dataUrl); return id; }
+  try { const blob = dataUrlToBlob(dataUrl); await idb.put(id, blob); photoCache.set(id, URL.createObjectURL(blob)); return id; }
   catch { toast("写真を端末に保存できませんでした（記録は残しました）"); return null; }
 }
-function dropPhotos(...ids) { for (const id of ids) if (id) { photoCache.delete(id); idb.del(id).catch(() => {}); } }
-const thumb = (id, label) => id ? `<img class="thumb" data-photo="${id}" data-act="photo" alt="${label}の写真">` : "";
+function dropPhotos(...ids) { for (const id of ids) if (id) { const u = photoCache.get(id); if (u && u.startsWith("blob:")) URL.revokeObjectURL(u); photoCache.delete(id); idb.del(id).catch(() => {}); } }
+const thumb = (id, label, purged) => id ? `<img class="thumb" data-photo="${id}" data-act="photo" alt="${label}の写真">` : purged ? `<span class="pill off" title="保存期間を過ぎたので写真を整理しました">写真は整理済み</span>` : "";
+/* 一覧の写真は画面に近づいたものだけ読み込む */
+const photoObserver = "IntersectionObserver" in window ? new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { photoObserver.unobserve(e.target); loadPhoto(e.target); } }, { rootMargin: "300px" }) : null;
+function loadPhoto(img) {
+  const id = img.dataset.photo;
+  if (photoCache.has(id)) { img.src = photoCache.get(id); return; }
+  idb.get(id).then(v => { if (v) { const u = photoUrl(v); photoCache.set(id, u); img.src = u; } else img.alt = "写真なし"; }).catch(() => {});
+}
 function fillPhotos() {
   document.querySelectorAll("img[data-photo]").forEach(img => {
-    if (img.getAttribute("src")) return;
-    const id = img.dataset.photo;
-    if (photoCache.has(id)) { img.src = photoCache.get(id); return; }
-    idb.get(id).then(v => { if (v) { photoCache.set(id, v); img.src = v; } else img.alt = "写真なし"; }).catch(() => {});
+    if (img.getAttribute("src") || img.dataset.wait) return;
+    if (photoObserver) { img.dataset.wait = "1"; photoObserver.observe(img); } else loadPhoto(img);
   });
+}
+/* 保存期間を過ぎた写真を消す（記録・GPSの距離は残す）。アプリ自身の整理なので罰の対象外 */
+let purging = false, usageAt = 0;
+async function purgePhotos() {
+  if (purging || busy) return; purging = true;
+  try {
+    const keep = +D.cfg.photoKeepDays || 0, limit = keep ? Date.now() - keep * 864e5 : -Infinity;
+    const old = [], live = new Set();
+    for (const s of D.sessions) { for (const k of ["inPhoto", "outPhoto"]) if (s[k]) { if ((s.end || s.start) < limit) old.push([s, k]); else live.add(s[k]); } }
+    for (const l of D.logs) if (l.photo) { if ((l.ts || parseD(l.date).getTime()) < limit) old.push([l, "photo"]); else live.add(l.photo); }
+    if (old.length) sysChange(`${keep}日より前の写真${old.length}枚を整理`, () => { for (const [r, k] of old) { dropPhotos(r[k]); r[k] = null; r.photoPurged = true; } });
+    const keys = await idb.keys();
+    for (const k of keys) if (!live.has(k)) dropPhotos(k);              // どの記録にも使われていない写真
+    for (const k of keys) if (live.has(k)) { const v = await idb.get(k); if (typeof v === "string") await idb.put(k, dataUrlToBlob(v)); }  // 古い形式を小さい形式へ
+    if (old.length) render();
+  } catch {}
+  purging = false; usageAt = 0; if (!$("p-set").hidden) renderSettings();
+}
+async function photoUsage() {
+  let n = 0, bytes = 0;
+  try { for (const k of await idb.keys()) { const v = await idb.get(k); n++; bytes += typeof v === "string" ? v.length * 0.75 : (v && v.size) || 0; } } catch {}
+  return { n, mb: bytes / 1048576 };
 }
 let camStream = null;
 function stopCam() { if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; } const v = $("camVideo"); v.srcObject = null; }
@@ -1283,7 +1328,7 @@ document.addEventListener("click", e => {
   if (a === "csv-robo" || a === "csv-class") return exportCsv(a.slice(4));
   if (a === "backup") {
     const ids = [...D.sessions.flatMap(s => [s.inPhoto, s.outPhoto]), ...D.logs.map(l => l.photo)].filter(Boolean);
-    Promise.all(ids.map(id => idb.get(id).then(v => [id, v]).catch(() => [id, null]))).then(pairs => {
+    Promise.all(ids.map(id => idb.get(id).then(async v => [id, v && typeof v !== "string" ? await blobToDataUrl(v) : v]).catch(() => [id, null]))).then(pairs => {
       const photos = Object.fromEntries(pairs.filter(p => p[1]));
       download(`勤怠バックアップ_${today().replace(/-/g,"")}.json`, JSON.stringify({ ...D, photos }), "application/json");
     });
@@ -1298,6 +1343,7 @@ document.addEventListener("input", e => {
   if (id === "punchNote") punchDraft = t.value;
   if (["rDen","rLate","rOff"].includes(id)) dirty.rule = true;
   if (id === "gAcc" || id === "gPhoto") dirty.acc = true;
+  if (id === "kKeep") dirty.keep = true;
   if (id === "gGrace") dirty.grace = true;
   if (id === "rStart" || id === "rEnd" || id === "rGoal" || id.startsWith("rd-")) dirty.robo = true;
   if (id === "pOn" || id === "pSince" || id === "pTh" || id.startsWith("pp-")) dirty.pen = true;
@@ -1321,7 +1367,7 @@ document.addEventListener("change", e => {
       if (D.sessions.length || D.logs.length || D.tasks.length) { toast("記録がある状態では戻せません（記録の巻き戻し防止）。機種変更などで空の状態のときに使ってください"); return; }
       const photos = x.photos || {}; delete x.photos;
       const g = D.guard, fl = D.flags; D = normalize(x); D.guard = g; D.flags = [...fl, ...(D.flags || [])]; save("バックアップから復元");
-      Promise.all(Object.entries(photos).map(([k, v]) => idb.put(k, v).catch(() => {}))).then(() => { photoCache.clear(); render(); });
+      Promise.all(Object.entries(photos).map(([k, v]) => idb.put(k, typeof v === "string" ? dataUrlToBlob(v) : v).catch(() => {}))).then(() => { photoCache.clear(); render(); });
       toast("バックアップから戻しました");
     }).catch(() => toast("このファイルは読み込めませんでした。書き出したバックアップ（.json）を選んでください"));
     t.value = "";
@@ -1361,6 +1407,7 @@ document.addEventListener("submit", e => {
     return;
   }
   if (f.id === "geoForm") { tightLoose("位置・写真の設定", { maxAcc: Math.max(10, Math.min(500, +$("gAcc").value || 100)), photo: $("gPhoto").checked }); dirty.acc = false; return; }
+  if (f.id === "keepForm") { tightLoose("写真を残す期間", { photoKeepDays: Math.max(0, +$("kKeep").value || 0) }); dirty.keep = false; usageAt = 0; return; }
   if (f.id === "graceForm") { tightLoose("催促までの時間", { grace: Math.max(0, Math.min(90, +$("gGrace").value || 0)) }); dirty.grace = false; return; }
   if (f.id === "subForm") { const name = $("sName").value.trim(); if (!name) return; D.subjects.push({ id: rid(), name, hours: Math.max(1, +$("sHours").value || 60) }); save(); $("sName").value = ""; render(); toast(`${name} を追加しました。時間割にも入れてください`); return; }
   if (f.id === "roboForm") {
@@ -1402,6 +1449,7 @@ function isLooser(k, nv, ov) {
     case "maxAcc": case "grace": case "lateUnit": case "roboStart": return nv > ov;
     case "limitDen": case "weekGoal": case "roboEnd": return nv < ov;
     case "photo": case "officialCounts": return ov && !nv;
+    case "photoKeepDays": return (nv || Infinity) < (ov || Infinity);
     case "roboDays": return ov.some(x => !nv.includes(x));
     default: return JSON.stringify(nv) !== JSON.stringify(ov);
   }
@@ -1472,8 +1520,8 @@ function exportPayload() {
   };
   const data = {
     periods: D.cfg.periods, timetable: Object.fromEntries(Object.entries(D.tt).map(([k, v]) => { const [w, p] = k.split("-"); return [`${WD[+w]}${p}限`, subjName(v)]; })),
-    sessions: D.sessions.slice(-300).map(s => ({ start: toLocalInput(s.start), end: s.end ? toLocalInput(s.end) : null, verified: verified(s), edited: !!s.edited, inGeo: stripGeo(s.inGeo), outGeo: stripGeo(s.outGeo), photo: !!(s.inPhoto || s.outPhoto), note: s.note || "" })),
-    classLogs: D.logs.slice(-500).map(l => ({ date: l.date, period: l.period, subject: subjName(l.subjectId), status: ST[l.status][0], hours: l.hours || 0, geo: stripGeo(l.geo), photo: !!l.photo, note: l.note || "" })),
+    sessions: D.sessions.slice(-300).map(s => ({ start: toLocalInput(s.start), end: s.end ? toLocalInput(s.end) : null, verified: verified(s), edited: !!s.edited, inGeo: stripGeo(s.inGeo), outGeo: stripGeo(s.outGeo), photo: !!(s.inPhoto || s.outPhoto || s.photoPurged), note: s.note || "" })),
+    classLogs: D.logs.slice(-500).map(l => ({ date: l.date, period: l.period, subject: subjName(l.subjectId), status: ST[l.status][0], hours: l.hours || 0, geo: stripGeo(l.geo), photo: !!(l.photo || l.photoPurged), note: l.note || "" })),
     offDays: D.offDays.slice(-60),
     tasks: D.tasks.filter(k => !k.deleted).slice(-100).map(k => ({ subject: k.subjectId ? subjName(k.subjectId) : "", title: k.title, due: k.due, done: k.done ? toLocalInput(k.done) : null }))
   };
@@ -1631,6 +1679,7 @@ if (D.cfg.roboStart === "16:30") sysChange("ロボコンの活動日を設定", 
 if (!D.subjects.length && !Object.keys(D.tt).length) applyPreset(true);
 applyDuePending();
 checkClock();
+setTimeout(purgePhotos, 3000);
 $("cDate").value = today();
 let t0 = "punch"; try { t0 = sessionStorage.getItem("kintai.tab") || "punch"; } catch {}
 if (Object.values(D.places).some(p => p.lat == null)) t0 = "set";
@@ -1640,7 +1689,7 @@ $("syRepo").value = SY.repo; $("syToken").value = SY.token;
 renderSync(); renderAdvice();
 if (SY.token) { pushRecords(false); fetchAdvice(); }
 setInterval(tick, 1000);
-setInterval(() => { if (!busy && !editing && !document.hidden) { checkClock(); if (applyDuePending()) render(); renderTodo(penaltyState()); renderAdvice(); renderTasks(); renderGuard(); } }, 60000);
+setInterval(() => { if (!document.hidden && Date.now() % 3600000 < 60000) purgePhotos(); if (!busy && !editing && !document.hidden) { checkClock(); if (applyDuePending()) render(); renderTodo(penaltyState()); renderAdvice(); renderTasks(); renderGuard(); } }, 60000);
 window.addEventListener("storage", e => { if (e.key === KEY && !busy) { load(); render(); } });
 document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) { checkClock(); applyDuePending(); punchMsg = null; $("todoMsg").hidden = true; $("classMsg").hidden = true; render(); if (SY.token) { pushRecords(false); if (Date.now() - SY.adviceAt > 120000) fetchAdvice(); } } });
 })();
