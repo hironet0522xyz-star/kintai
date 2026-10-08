@@ -248,6 +248,7 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
     <button class="tab" role="tab" id="t-punch" data-tab="punch">打刻</button>
     <button class="tab" role="tab" id="t-class" data-tab="class">授業</button>
     <button class="tab" role="tab" id="t-task" data-tab="task">課題</button>
+    <button class="tab" role="tab" id="t-study" data-tab="study">勉強</button>
     <button class="tab" role="tab" id="t-pen" data-tab="pen">罰</button>
     <button class="tab" role="tab" id="t-sum" data-tab="sum">集計</button>
     <button class="tab" role="tab" id="t-set" data-tab="set">設定</button>
@@ -333,6 +334,32 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
     </div>
   </section>
 
+  <!-- 勉強 -->
+  <section class="panel" id="p-study" role="tabpanel" hidden>
+    <div class="box" id="studyStart">
+      <h2>勉強をはじめる</h2>
+      <form class="form" id="studyForm">
+        <div class="field"><label for="ySubj">科目</label><select id="ySubj"></select></div>
+        <div class="field" style="flex-basis:100%"><label for="yTitle">やること</label><input type="text" id="yTitle" maxlength="60" placeholder="例：微分方程式 演習プリント3"></div>
+        <button class="btn primary" type="submit" id="ySubmit">教材を撮って始める</button>
+      </form>
+      <p class="muted small" id="studyHow"></p>
+    </div>
+    <div class="box" id="studyNow" hidden></div>
+    <div class="box">
+      <div class="box-head"><h2>勉強の記録</h2><span class="muted small" id="studyWeek"></span></div>
+      <div class="list" id="studyList"></div>
+    </div>
+    <div class="box">
+      <h2>報告の間隔</h2>
+      <form class="form" id="studyCfg">
+        <div class="field narrow"><label for="yEvery">何分ごとに写真で報告するか</label><input type="number" id="yEvery" min="10" max="60" step="5"></div>
+        <button class="btn" type="submit">保存</button>
+      </form>
+      <p class="muted small">間隔を短くするのはすぐ、長くするのは24時間後に有効になります。</p>
+    </div>
+  </section>
+
   <!-- 罰 -->
   <section class="panel" id="p-pen" role="tabpanel" hidden>
     <div class="box" id="penHead"></div>
@@ -399,6 +426,16 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
         <button class="btn" type="submit">保存</button>
       </form>
       <p class="muted small">誤差がこれより大きいときは打刻できません。校舎の中で通りにくい場合は 100〜150 にしてください。</p>
+      <details class="small" style="margin-top:8px"><summary><b>二度寝の感知（iPhoneのショートカット）</b></summary>
+        <p class="muted">アラームを止めた時刻をこのアプリに記録し、止めてから10分以内に起床チェックがなければ「二度寝」（罰ポイント）にします。</p>
+        <ol class="muted" style="padding-left:1.2em;margin:4px 0">
+          <li>「ショートカット」アプリ →「オートメーション」→ 右上の「＋」</li>
+          <li>「アラーム」→「停止したとき」を選び、朝に使うアラームを選ぶ →「すぐに実行」→「次へ」</li>
+          <li>「新規の空のオートメーション」→「アクションを追加」→「URLを開く」</li>
+          <li>URLに下の文字を貼り付けて「完了」</li>
+        </ol>
+        <div class="btnrow"><code id="alarmUrl" style="word-break:break-all">https://hironet0522xyz-star.github.io/kintai/kintai.html#alarm</code><button class="btn sm" type="button" data-act="copy-alarm">URLをコピー</button></div>
+      </details>
     </div>
     <div class="box">
       <h2>科目</h2>
@@ -514,7 +551,7 @@ const ST = { present:["出席","ok"], late:["遅刻","warn"], early:["早退","w
 const ONSITE = ["present","late","early"];
 const FIT = { lat:33.695446, lon:130.4395 };   // 福岡工業大学（福岡市東区和白東3-30-1）
 const PLACE_DEF = { school:{ name:"福岡工業大学", lat:FIT.lat, lon:FIT.lon, radius:400, preset:true, fit:true }, lab:{ name:"作業場", lat:FIT.lat, lon:FIT.lon, radius:400, preset:true } };
-const CFG_DEF = { wakeOn:true, wakeBefore:60, wakeGrace:30, maxAcc:100, photo:true, taskProof:true, autoTask:true, autoTaskDays:2, photoKeepDays:60, camFacing:"user", limitDen:3, lateUnit:3, officialCounts:false, grace:15,
+const CFG_DEF = { wakeOn:true, wakeBefore:60, wakeGrace:30, studyEvery:25, maxAcc:100, photo:true, taskProof:true, autoTask:true, autoTaskDays:2, photoKeepDays:60, camFacing:"user", limitDen:3, lateUnit:3, officialCounts:false, grace:15,
   periods:[["09:00","10:30"],["10:40","12:10"],["13:00","14:30"],["14:40","16:10"],["16:20","17:50"]],
   roboDays:[1,4,5], roboStart:"18:00", roboEnd:"20:00", weekGoal:6 };
 const PEN_TYPES = [
@@ -529,6 +566,7 @@ const PEN_TYPES = [
   ["overdue","課題の期限切れ（未提出）", 3, "2026-10-07"],
   ["latesub","課題の遅れ提出", 1, "2026-10-07"],
   ["oversleep","起床チェックなし（起きる時刻から30分以内）", 2, "2026-10-09"],
+  ["snooze", "二度寝（アラームを止めて10分以内に起床チェックなし）", 2, "2026-10-09"],
   ["tamper", "改ざん・時計の巻き戻し（自動検知）", 5, "2026-10-07"],
   ["delete", "記録の削除（登録から10分以上たったもの）", 1, "2026-10-07"],
   ["clean",  "1週間ノーミス（ボーナス）", -2]
@@ -538,11 +576,11 @@ function penDef() { return { on:true, since: ymd(new Date(addDays(Date.now(), 1)
   menu:[{ id:"p1", name:"腕立て伏せ50回", cost:3 },{ id:"p2", name:"部室の掃除", cost:3 },{ id:"p3", name:"スマホゲーム1日禁止", cost:5 },{ id:"p4", name:"おやつ・ジュース1週間禁止", cost:8 }], paid:[] }; }
 
 /* ---------- 保存 ---------- */
-function blank() { return { v:2, places: JSON.parse(JSON.stringify(PLACE_DEF)), cfg: JSON.parse(JSON.stringify(CFG_DEF)), subjects:[], sessions:[], logs:[], tasks:[], wakes:[], tt:{}, offDays:[], flags:[], pending:[], penalty: penDef() }; }
+function blank() { return { v:2, places: JSON.parse(JSON.stringify(PLACE_DEF)), cfg: JSON.parse(JSON.stringify(CFG_DEF)), subjects:[], sessions:[], logs:[], tasks:[], wakes:[], alarms:[], study:[], tt:{}, offDays:[], flags:[], pending:[], penalty: penDef() }; }
 function normalize(x) {
   const b = blank();
   const p = { ...b.penalty, ...(x.penalty || {}) }; p.pts = { ...b.penalty.pts, ...((x.penalty || {}).pts || {}) };
-  return { ...b, ...x, v:2, places:{ ...b.places, ...(x.places || {}) }, cfg:{ ...b.cfg, ...(x.cfg || {}) }, tt: x.tt || {}, offDays: x.offDays || [], tasks: x.tasks || [], wakes: x.wakes || [], flags: x.flags || [], pending: x.pending || [], penalty: p };
+  return { ...b, ...x, v:2, places:{ ...b.places, ...(x.places || {}) }, cfg:{ ...b.cfg, ...(x.cfg || {}) }, tt: x.tt || {}, offDays: x.offDays || [], tasks: x.tasks || [], wakes: x.wakes || [], alarms: x.alarms || [], study: x.study || [], flags: x.flags || [], pending: x.pending || [], penalty: p };
 }
 let D = null, storageOk = true;
 let rawAtLoad = null;
@@ -574,10 +612,12 @@ function save(action, sys) {
  *  - 機能を変えたら APP_VERSION を上げる（更新の記録が監査ログに1行残る）。
  *  - 監査ログ（kintai.audit）の形式を変えるときも消さずに追記で移行する。長さが減るとClaudeが巻き戻しと判定する。
  */
-const APP_VERSION = "2026.10.08-wake9";
+const APP_VERSION = "2026.10.08-study1";
 const GOAL_VERIFIED_FROM = "2026-10-12";
 const AUTO_TASK_FROM = "2026-10-08";
-const WAKE_FROM = "2026-10-09";             // この日から起床チェックを始める（それより前には遡らない）        // この日の授業から、授業後に課題を自動登録する（それより前には遡らない）   // この週から、週の目標は位置確認済みの作業時間だけで数える（それより前の週には遡らない）
+const WAKE_FROM = "2026-10-09";             // この日から起床チェックを始める（それより前には遡らない）
+const ALARM_GAP = 10 * 60000;               // アラームを止めてから起床チェックまでの猶予（過ぎたら二度寝）
+const STUDY_LATE = 10 * 60000, STUDY_SOON = 5 * 60000;   // 勉強の成果報告：予定時刻の5分前から、10分遅れまで
 const AUDIT_KEY = "kintai.audit", SEEN_KEY = "kintai.seen", DELAY_MS = 24 * 3600000, FREE_DELETE_MS = 10 * 60000;
 let A = { v:1, len:0, head:"0", ver:"", entries:[] };
 function cyrb53(str, seed = 0) {
@@ -763,7 +803,9 @@ function penaltyEvents() {
   }
   for (let t = sinceMs, n = 0; ymd(new Date(t)) <= todayStr && n < 500; t = addDays(t, 1), n++) {
     const d = ymd(new Date(t)), w = wakeInfo(d);
-    if (w && now > w.close && !(w.log && w.log.ts <= w.close)) add(d, "oversleep", w.log ? `${hm(w.log.ts)}に打刻（起きる時刻 ${hm(w.wake)}）` : `起きる時刻 ${hm(w.wake)}`);
+    if (!w) continue;
+    if (now > w.close && !(w.log && w.log.ts <= w.close)) add(d, "oversleep", w.log ? `${hm(w.log.ts)}に打刻（起きる時刻 ${hm(w.wake)}）` : `起きる時刻 ${hm(w.wake)}`);
+    else if (w.alarm && now > w.alarm.ts + ALARM_GAP && !(w.log && w.log.ts <= w.alarm.ts + ALARM_GAP)) add(d, "snooze", `${hm(w.alarm.ts)}にアラームを止めて、${w.log ? hm(w.log.ts) + "に起床チェック" : "起床チェックなし"}`);
   }
   for (const k of D.tasks) {
     const due = fromLocalInput(k.due); if (!due || ymd(new Date(due)) < since) continue;
@@ -818,7 +860,7 @@ const LV = { ok:["余裕あり","ok"], warn:["注意","warn"], crit:["危険","c
 function render() {
   D.penalty.pts = curPts();   // 表示用（罰の計算は ptsAt で日付ごとに行う）
   const ps = penaltyState();
-  renderNotes(ps); renderTodo(ps); renderAdvice(); renderTasks(); renderPunch(); renderWeek(); renderSessions(); renderClass(); renderPen(ps); renderSummary(); renderSettings(); renderGuard(); tick(); fillPhotos();
+  renderNotes(ps); renderTodo(ps); renderAdvice(); renderTasks(); renderStudy(); renderPunch(); renderWeek(); renderSessions(); renderClass(); renderPen(ps); renderSummary(); renderSettings(); renderGuard(); tick(); fillPhotos();
 }
 function renderNotes(ps) {
   $("secureNote").hidden = !!(window.isSecureContext && navigator.geolocation);
@@ -870,12 +912,18 @@ function renderTodo(ps) {
   }
   { const w = wakeInfo(d);
     if (w && !w.log && now >= w.open && now < w.first) {
-      const q = wakeQ || newWakeQ(), late = now > w.close;
-      items.unshift({ lv: late ? "crit" : now >= w.wake ? "warn" : "info", t: late ? `起床チェックの時刻（${hm(w.close)}まで）を過ぎました` : `起床チェック：${hm(w.wake)}に起きる（${hm(w.close)}まで）`,
-        s: late ? `罰ポイント +${ptsAt(d, "oversleep")}。打刻は記録として残せます` : `最初の授業は${hm(w.first)}。目を覚ますために足し算を1問：${q.a} + ${q.b} = ?`,
+      const q = wakeQ || newWakeQ(), late = now > w.close, al = w.alarm, alDue = al ? al.ts + ALARM_GAP : 0, snoozed = al && now > alDue;
+      items.unshift({ lv: late || snoozed ? "crit" : al || now >= w.wake ? "warn" : "info",
+        t: late ? `起床チェックの時刻（${hm(w.close)}まで）を過ぎました` : snoozed ? `アラームを止めてから10分たちました（二度寝）` : al ? `アラームを止めました。${hm(alDue)}までに起床チェック` : `起床チェック：${hm(w.wake)}に起きる（${hm(w.close)}まで）`,
+        s: late ? `罰ポイント +${ptsAt(d, "oversleep")}。打刻は記録として残せます` : snoozed ? `罰ポイント +${ptsAt(d, "snooze")}。今すぐ起きて打刻すれば、寝坊（+${ptsAt(d, "oversleep")}）にはなりません。足し算を1問：${q.a} + ${q.b} = ?` : `最初の授業は${hm(w.first)}。目を覚ますために足し算を1問：${q.a} + ${q.b} = ?`,
         acts: `<input type="number" id="wakeAns" inputmode="numeric" style="width:100px" aria-label="答え" placeholder="答え" value="${esc(wakeDraft)}"><button class="btn sm primary" data-act="wake">起きた</button>` });
     }
   }
+  { const s = openStudy();
+    if (s) { const st = studyDue(s);
+      items.unshift({ lv: st.late ? "crit" : st.soon ? "warn" : "info", t: st.late ? `勉強の報告が遅れています：${esc(studyName(s))}` : st.soon ? `勉強の成果を報告する時間です（${hm(st.due)}）` : `勉強中：${esc(studyName(s))}`,
+        s: st.late ? `${hm(st.last)}からの間は数えません。撮るとそこから数え直します` : st.soon ? "進んだところ（ノート・解いた問題）を写してください" : `確認できた時間 ${dur(studyMs(s))}・次の報告 ${hm(st.due)}`,
+        acts: `<button class="btn sm primary" data-act="study-shot" ${busy ? "disabled" : ""}>写真で報告</button><button class="btn sm" data-tab="study">勉強タブへ</button>` }); } }
   for (const k of D.tasks.filter(t => t.auto && !t.detailed && !t.done && !t.deleted && t.classDate === d)) {
     const due = fromLocalInput(k.due);
     items.push({ lv:"info", t:`${k.period ? k.period + "限 " : ""}${esc(subjName(k.subjectId))}：課題の内容を確認`, s:`今の設定：「${esc(k.title)}」締切 ${md(due)} ${hm(due)}。今日のうちなら自由に直せます`,
@@ -1003,7 +1051,8 @@ function wakeInfo(d) {
   if (D.cfg.wakeOn === false || isOff(d)) return null;
   const sl = slotsOn(d); if (!sl.length) return null;
   const first = Math.min(...sl.map(x => x.start)), wake = first - (+D.cfg.wakeBefore || 60) * 60000;
-  return { first, wake, open: wake - 120 * 60000, close: wake + (+D.cfg.wakeGrace || 30) * 60000, log: (D.wakes || []).find(w => w.date === d) };
+  const alarm = (D.alarms || []).find(a => a.date === d && a.ts >= wake - 4 * 3600000 && a.ts < first) || null;
+  return { first, wake, open: Math.min(wake - 120 * 60000, alarm ? alarm.ts : Infinity), close: wake + (+D.cfg.wakeGrace || 30) * 60000, alarm, log: (D.wakes || []).find(w => w.date === d) };
 }
 let wakeQ = null, wakeDraft = "";
 function newWakeQ() { const a = 12 + Math.floor(Math.random() * 70), b = 7 + Math.floor(Math.random() * 25); wakeQ = { a, b }; return wakeQ; }
@@ -1194,7 +1243,7 @@ function tick() {
 }
 function setTab(t) {
   tab = t;
-  for (const k of ["punch","class","task","pen","sum","set"]) { $("p-" + k).hidden = k !== t; $("t-" + k).setAttribute("aria-selected", k === t); }
+  for (const k of ["punch","class","task","study","pen","sum","set"]) { $("p-" + k).hidden = k !== t; $("t-" + k).setAttribute("aria-selected", k === t); }
   try { sessionStorage.setItem("kintai.tab", t); } catch {}
   if (t === "set" && D) { usageAt = 0; renderSettings(); }
   window.scrollTo(0, 0);
@@ -1256,6 +1305,8 @@ async function purgePhotos() {
     const old = [], live = new Set();
     for (const s of D.sessions) { for (const k of ["inPhoto", "outPhoto"]) if (s[k]) { if ((s.end || s.start) < limit) old.push([s, k]); else live.add(s[k]); } }
     for (const l of D.logs) if (l.photo) { if ((l.ts || parseD(l.date).getTime()) < limit) old.push([l, "photo"]); else live.add(l.photo); }
+    const sLimit = Date.now() - Math.min(keep || 14, 14) * 864e5;   // 勉強の写真は枚数が多いので最長14日
+    for (const st of D.study || []) for (const sh of st.shots) if (sh.photo) { if (sh.ts < sLimit && st.verify !== "pending" && st.end) old.push([sh, "photo"]); else live.add(sh.photo); }
     for (const t of D.tasks) if (t.proof) { if ((t.done || t.created || 0) < limit && t.verify !== "pending") old.push([t, "proof"]); else live.add(t.proof); }
     if (old.length) sysChange(`${keep}日より前の写真${old.length}枚を整理`, () => { for (const [r, k] of old) { dropPhotos(r[k]); r[k] = null; r.photoPurged = true; } });
     const keys = await idb.keys();
@@ -1347,17 +1398,23 @@ function analyzeProof(src) {
   const hg = h.getContext("2d", { willReadFrequently: true }); hg.drawImage(src, 0, 0, 9, 8);
   const hp = hg.getImageData(0, 0, 9, 8).data; let bits = "";
   for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) { const a = (y * 9 + x) * 4, b = a + 4; bits += (hp[a] + hp[a + 1] + hp[a + 2]) > (hp[b] + hp[b + 1] + hp[b + 2]) ? "1" : "0"; }
+  // 32×32の明るさ（16段階）。勉強の報告で「前の写真から変わったか」を見る
+  const tc = document.createElement("canvas"); tc.width = 32; tc.height = 32;
+  const tg = tc.getContext("2d", { willReadFrequently: true }); tg.drawImage(src, 0, 0, 32, 32);
+  const tp = tg.getImageData(0, 0, 32, 32).data; let tiny = "";
+  for (let i = 0; i < 1024; i++) tiny += Math.min(15, Math.floor((0.299 * tp[i * 4] + 0.587 * tp[i * 4 + 1] + 0.114 * tp[i * 4 + 2]) / 16)).toString(16);
   let reason = "";
   if (mean < 45) reason = "暗すぎます。明るい場所で撮ってください";
   else if (mean > 240 && std < 12) reason = "白く飛んでいます。光の反射を避けて撮ってください";
   else if (std < 12) reason = "ほとんど何も写っていません。課題の紙や画面を写してください";
   else if (dens < 0.04) reason = "文字や図が読み取れません。課題に近づいて、枠いっぱいに写してください";
   else if (lapVar < 120) reason = "ぼやけています。ピントを合わせて、手を止めて撮ってください";
-  return { ok: !reason, reason, hash: bits, stats: { mean: Math.round(mean), std: Math.round(std), dens: +dens.toFixed(3), lapVar: Math.round(lapVar) } };
+  return { ok: !reason, reason, hash: bits, tiny, stats: { mean: Math.round(mean), std: Math.round(std), dens: +dens.toFixed(3), lapVar: Math.round(lapVar) } };
 }
 const hamming = (a, b) => { let d = 0; for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) d++; return d; };
 window.__kintai = { analyzeProof };   // テスト用（中身を読むだけ）
-function takeProof(label, task) {
+/* opt: { sub: 案内文, dup: hash => はじく理由 | null, max: 長い辺のpx } */
+function takeProof(label, task, opt = {}) {
   return new Promise((resolve, reject) => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return reject({ msg:"この開き方ではカメラが使えません。https のURLで開いてください" });
     const box = $("cam"), v = $("camVideo"), shot = $("camShot");
@@ -1369,7 +1426,7 @@ function takeProof(label, task) {
       v.classList.toggle("mirror", facing === "user");
       v.srcObject = camStream; await v.play().catch(() => {});
     };
-    $("camTitle").textContent = label; $("camSub").textContent = "提出物（紙・画面）を枠いっぱいに、明るい所で写してください";
+    $("camTitle").textContent = label; $("camSub").textContent = opt.sub || "提出物（紙・画面）を枠いっぱいに、明るい所で写してください";
     box.hidden = false; shot.disabled = false;
     start().catch(e => finish(reject, { msg: e && e.name === "NotAllowedError" ? "カメラの利用が許可されていません。ブラウザの設定でこのサイトにカメラを許可してください" : "カメラを起動できませんでした" }));
     $("camFlip").onclick = () => { facing = facing === "user" ? "environment" : "user"; start().catch(() => toast("カメラを切り替えられませんでした")); };
@@ -1377,17 +1434,19 @@ function takeProof(label, task) {
     shot.onclick = () => {
       const w = v.videoWidth, h = v.videoHeight;
       if (!w || !h) return toast("カメラの準備中です。少し待ってから押してください");
-      const k = Math.min(1, 720 / Math.max(w, h)), c = document.createElement("canvas");
+      const k = Math.min(1, (opt.max || 720) / Math.max(w, h)), c = document.createElement("canvas");
       c.width = Math.round(w * k); c.height = Math.round(h * k);
       const g = c.getContext("2d"); g.drawImage(v, 0, 0, c.width, c.height);
       const a = analyzeProof(c);
-      const dup = a.ok && D.tasks.find(t => t.id !== task.id && t.proofHash && hamming(t.proofHash, a.hash) <= 6);
-      if (!a.ok || dup) { $("camSub").textContent = `撮り直してください：${dup ? `「${dup.title}」で使った写真とほぼ同じです` : a.reason}`; return; }
+      let dup = null;
+      if (a.ok && opt.dup) dup = opt.dup(a);
+      else if (a.ok && task) { const t = D.tasks.find(t => t.id !== task.id && t.proofHash && hamming(t.proofHash, a.hash) <= 6); if (t) dup = `「${t.title}」で使った写真とほぼ同じです`; }
+      if (!a.ok || dup) { $("camSub").textContent = `撮り直してください：${dup || a.reason}`; return; }
       const shotAt = new Date(), bh = Math.max(36, Math.round(c.height * 0.08));
       g.fillStyle = "rgba(0,0,0,.62)"; g.fillRect(0, c.height - bh, c.width, bh);
       g.textBaseline = "middle"; g.font = `${Math.round(bh * 0.42)}px sans-serif`; g.fillStyle = "#fff";
       g.fillText(`${ymd(shotAt).replace(/-/g, "/")} ${hm(shotAt.getTime())}:${pad(shotAt.getSeconds())}  ${label}`, Math.round(bh * 0.3), c.height - bh / 2, c.width - bh * 0.6);
-      finish(resolve, { photo: c.toDataURL("image/jpeg", 0.72), hash: a.hash });
+      finish(resolve, { photo: c.toDataURL("image/jpeg", 0.72), hash: a.hash, tiny: a.tiny });
     };
   });
 }
@@ -1402,6 +1461,121 @@ async function submitTask(id) {
   Object.assign(k, { done: Date.now(), proof: pid, proofHash: r.hash, verify: SY.token ? "pending" : "local", proofNg: null, proofUp: false });
   busy = false; save("課題を提出（証拠写真あり）"); render(); doneToast(k);
   if (SY.token) scheduleSync();
+}
+/* ---------- 勉強の監視（写真で成果報告） ----------
+ * 始めるときに教材を撮り、そのあと studyEvery 分ごとに進んだところを撮る。
+ * 写真と写真の間（間隔＋10分以内）だけを勉強時間に数える。遅れた間は数えない。
+ * 前の写真とほぼ同じ写真ははじく。終わったら最初と最後の写真を1枚に並べて、Claudeが今夜1回だけ確認する（連携中のみ）。 */
+const studyEvery = () => Math.max(10, Math.min(60, +D.cfg.studyEvery || 25)) * 60000;
+const openStudy = () => (D.study || []).find(s => !s.end);
+const lastShotTs = s => s.shots.length ? s.shots[s.shots.length - 1].ts : s.start;
+const studyName = s => [s.subjectId ? subjName(s.subjectId) : "", s.title].filter(Boolean).join("：") || "勉強";
+function studyMs(s, from = -Infinity, to = Infinity) {
+  if (s.verify === "ng") return 0;
+  const lim = studyEvery() + STUDY_LATE; let ms = 0;
+  for (let i = 1; i < s.shots.length; i++) { const a = s.shots[i - 1].ts, b = s.shots[i].ts; if (b - a <= lim) ms += Math.max(0, Math.min(b, to) - Math.max(a, from)); }
+  return ms;
+}
+const studyBetween = (a, b) => (D.study || []).reduce((t, s) => t + studyMs(s, a, b), 0);
+function studyDue(s) { const last = lastShotTs(s), due = last + studyEvery(), now = Date.now(); return { last, due, soon: now >= due - STUDY_SOON, late: now > due + STUDY_LATE }; }
+/* 前の報告の写真から変わった割合（32×32の区画のうち、明るさがはっきり変わった区画）。0〜1 */
+function tinyDiff(a, b) { if (!a || !b || a.length !== b.length) return 1; let n = 0; for (let i = 0; i < a.length; i++) if (Math.abs(parseInt(a[i], 16) - parseInt(b[i], 16)) >= 2) n++; return n / a.length; }
+/* 写真の結果から「はじく理由」を返す：前の報告からほとんど変わっていなければ撮り直し */
+const studyDup = s => a => { const prev = s && s.shots[s.shots.length - 1];
+  return prev && (hamming(prev.hash || "", a.hash) <= 1 || tinyDiff(prev.tiny, a.tiny) < 0.01) ? "前の報告の写真とほぼ同じです。進んだところ（書いたノート・解いた問題）を写してください" : null; };
+let audioCtx = null, wakeLockObj = null, beepedFor = 0;
+function unlockAudio() { try { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); if (audioCtx.state === "suspended") audioCtx.resume(); } catch {} }
+function beep() {
+  try { if (!audioCtx) return; const t0 = audioCtx.currentTime;
+    for (let i = 0; i < 3; i++) { const o = audioCtx.createOscillator(), g = audioCtx.createGain(); o.frequency.value = 880; o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(0.25, t0 + i * 0.35); g.gain.exponentialRampToValueAtTime(0.001, t0 + i * 0.35 + 0.25); o.start(t0 + i * 0.35); o.stop(t0 + i * 0.35 + 0.26); } } catch {}
+  try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch {}
+}
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLockObj && navigator.wakeLock && !document.hidden) { wakeLockObj = await navigator.wakeLock.request("screen"); wakeLockObj.addEventListener("release", () => { wakeLockObj = null; }); }
+    else if (!on && wakeLockObj) { const w = wakeLockObj; wakeLockObj = null; await w.release(); }
+  } catch { wakeLockObj = null; }
+}
+/* 毎秒：報告の時刻になったら一度だけ音で知らせる（画面が開いているときだけ） */
+function studyTick() {
+  const s = openStudy(); if (!s || document.hidden) return;
+  const st = studyDue(s);
+  if (Date.now() >= st.due && beepedFor !== st.due) { beepedFor = st.due; beep(); if (!busy) { renderStudy(); renderTodo(penaltyState()); } }
+}
+/* 報告が3時間以上ない勉強は、最後の写真の時刻で終わったことにする（アプリの整理なので罰なし） */
+function closeStaleStudy() {
+  const s = openStudy(); if (!s || Date.now() - lastShotTs(s) < 3 * 3600000) return false;
+  sysChange(`勉強の記録を自動で終了（${studyName(s)}・最後の報告 ${hm(lastShotTs(s))}）`, () => { s.end = lastShotTs(s); s.auto = true; s.verify = s.shots.length >= 2 && SY.token ? "pending" : "local"; });
+  keepAwake(false); return true;
+}
+async function studyPhoto(label, s, sub) {
+  const r = await takeProof(label, null, { sub, max: 560, dup: studyDup(s) });
+  const photo = await savePhoto(r.photo);
+  return { ts: Date.now(), photo, hash: r.hash, tiny: r.tiny };
+}
+async function studyStart() {
+  if (busy || openStudy()) return;
+  unlockAudio();
+  const subjectId = $("ySubj").value || null, title = $("yTitle").value.trim();
+  if (!subjectId && !title) return toast("科目か、やることを入れてください");
+  busy = "study"; render();
+  let shot;
+  try { shot = await studyPhoto(`勉強開始：${[subjectId ? subjName(subjectId) : "", title].filter(Boolean).join(" ")}`, null, "これから使う教科書・ノート・問題集を、枠いっぱいに写してください"); }
+  catch (e) { busy = false; render(); return toast(e.msg); }
+  D.study.push({ id: rid(), start: shot.ts, end: null, subjectId, title, shots: [shot], verify: "local" });
+  busy = false; $("yTitle").value = ""; beepedFor = 0;
+  save(`勉強を開始：${studyName(D.study[D.study.length - 1])}`); render(); keepAwake(true);
+  toast(`始めました。${Math.round(studyEvery() / 60000)}分後に、進んだところを写して報告してください`);
+}
+async function studyShot(end) {
+  const s = openStudy(); if (!s || busy) return;
+  unlockAudio();
+  const late = studyDue(s).late;
+  busy = "study"; render();
+  let shot;
+  try { shot = await studyPhoto(end ? `勉強終了：${studyName(s)}` : `成果報告：${studyName(s)}`, s, "前の報告から進んだところ（書いたノート・解いた問題）を写してください"); }
+  catch (e) { busy = false; render(); return toast(e.msg); }
+  for (const x of s.shots) delete x.tiny;   // 比べるのは直前の1枚だけなので、保存を軽くする
+  s.shots.push(shot); busy = false;
+  if (end) { delete shot.tiny; s.end = shot.ts; s.verify = s.shots.length >= 2 && SY.token ? "pending" : "local"; keepAwake(false); }
+  save(end ? `勉強を終了：${studyName(s)}` : "勉強の成果を報告"); render();
+  toast(end ? `おつかれさま。確認できた勉強時間は ${dur(studyMs(s))}${s.verify === "pending" ? "（最初と最後の写真を今夜Claudeが確認）" : ""}` : late ? "報告しました。遅れていた間は数えていません。ここから数え直します" : `報告しました。次は${hm(shot.ts + studyEvery())}ごろ`);
+  if (end && SY.token) scheduleSync();
+}
+function studyEndNoPhoto() {
+  const s = openStudy(); if (!s) return;
+  s.end = lastShotTs(s); s.verify = s.shots.length >= 2 && SY.token ? "pending" : "local";
+  save(`勉強を終了（写真なし）：${studyName(s)}`); keepAwake(false); render();
+  toast(`終了しました。最後の報告（${hm(s.end)}）までを数えます：${dur(studyMs(s))}`);
+  if (SY.token) scheduleSync();
+}
+function renderStudy() {
+  const ys = $("ySubj"), cur = ys.value;
+  ys.innerHTML = `<option value="">（科目なし）</option>` + D.subjects.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
+  if ([...ys.options].some(o => o.value === cur)) ys.value = cur;
+  if (!dirty.study) $("yEvery").value = Math.round(studyEvery() / 60000);
+  const ev = Math.round(studyEvery() / 60000), s = openStudy(), now = Date.now();
+  $("studyHow").textContent = `最初に教材を撮り、${ev}分ごとに進んだところを撮って報告します。写真と写真の間だけを勉強時間に数え、報告が${ev + 10}分を過ぎた間は数えません。画面をつけたまま置いておくと、時間になったら音で知らせます。`;
+  $("studyStart").hidden = !!s; $("studyNow").hidden = !s;
+  $("ySubmit").disabled = !!busy; $("ySubmit").textContent = busy === "study" ? "撮影中…" : "教材を撮って始める";
+  if (s) {
+    const st = studyDue(s), cls = st.late ? "crit" : st.soon ? "warn" : "ok";
+    $("studyNow").innerHTML = `<div class="box-head"><h2>勉強中：${esc(studyName(s))}</h2><span class="pill ${cls}">${st.late ? "報告が遅れています" : now >= st.due ? "報告の時間です" : st.soon ? "もうすぐ報告" : "集中"}</span></div>
+      <div class="elapsed" data-since="${s.start}">${clock(now - s.start)}</div>
+      <p class="small">確認できた時間 <b>${dur(studyMs(s))}</b>・報告 ${s.shots.length - 1}回・次の報告 <b>${hm(st.due)}</b>${now < st.due ? `（あと${dur(st.due - now)}）` : ""}</p>
+      ${st.late ? `<div class="gpsmsg crit">${hm(st.last)}からの報告がありません。この間は勉強時間に数えません。写真を撮るとそこから数え直します</div>` : ""}
+      <div class="btnrow"><button class="btn primary" data-act="study-shot" ${busy ? "disabled" : ""}>${busy === "study" ? "撮影中…" : "成果を写真で報告"}</button><button class="btn" data-act="study-end" ${busy ? "disabled" : ""}>写真を撮って終える</button>${delBtn("study-end0", "study-end0", s.id, "写真なしで終える")}</div>
+      <div class="thumbs" style="margin-top:8px">${s.shots.slice(-6).map(x => thumb(x.photo, "勉強", x.photoPurged)).join("")}</div>`;
+  }
+  const ws = weekStart(), wk = studyBetween(ws, addDays(ws, 7)), td = studyBetween(dayStart(), addDays(dayStart(), 1));
+  $("studyWeek").textContent = `今日 ${dur(td)}・今週 ${hrs(wk)} 時間`;
+  $("t-study").innerHTML = `勉強${s && studyDue(s).soon ? `<span class="badge">!</span>` : ""}`;
+  const list = (D.study || []).filter(x => x.end).sort((a, b) => b.start - a.start).slice(0, 30);
+  const badge = x => ({ pending: `<span class="pill info">今夜Claudeが確認</span>`, ok: `<span class="pill ok">Claude確認済み</span>`, ng: `<span class="pill crit" style="white-space:normal">認められず${x.ng ? "：" + esc(x.ng) : ""}</span>`, local: `<span class="pill off">端末チェック済み</span>` }[x.verify] || "");
+  $("studyList").innerHTML = list.length ? list.map(x => `<div class="row"><span class="date">${md(x.start)}</span>
+      <div class="main">${thumb(x.shots[0] && x.shots[0].photo, "開始", x.shots[0] && x.shots[0].photoPurged)}${x.shots.length > 1 ? thumb(x.shots[x.shots.length - 1].photo, "終了", x.shots[x.shots.length - 1].photoPurged) : ""}<b>${esc(studyName(x))}</b><span class="mono small muted">${hm(x.start)}→${hm(x.end)}</span><span class="mono small">${dur(studyMs(x))}</span><span class="small muted">報告${x.shots.length - 1}回</span>${x.auto ? `<span class="pill warn">自動で終了</span>` : ""}${badge(x)}</div></div>`).join("")
+    : `<p class="empty">まだ記録がありません</p>`;
 }
 function doneToast(k) { toast(k.done > fromLocalInput(k.due) ? `提出を記録しました（遅れ提出 +${ptsAt(today(), "latesub")}点）` : k.verify === "pending" ? "提出を記録しました。証拠写真は今夜Claudeが確認します" : "提出を記録しました。おつかれさま"); }
 
@@ -1524,13 +1698,17 @@ document.addEventListener("click", e => {
   if (a === "menu-del") { if (armed !== "menu:" + id) return arm("menu:" + id); armed = null; D.penalty.menu = D.penalty.menu.filter(m => m.id !== id); save(); render(); return; }
   if (a === "preset") return applyPreset(false);
   if (a === "task-done") return submitTask(id);
+  if (a === "copy-alarm") { const u = location.origin + location.pathname + "#alarm"; try { navigator.clipboard.writeText(u).then(() => toast("URLをコピーしました。ショートカットに貼り付けてください"), () => toast(u)); } catch { toast(u); } return; }
+  if (a === "study-shot") return studyShot(false);
+  if (a === "study-end") return studyShot(true);
+  if (a === "study-end0") { if (armed !== "study-end0") return arm("study-end0"); armed = null; return studyEndNoPhoto(); }
   if (a === "wake") {
     const d = today(), w = wakeInfo(d); if (!w || w.log) return;
     const q = wakeQ || newWakeQ(), ans = +($("wakeAns") || {}).value;
     if (ans !== q.a + q.b) { newWakeQ(); wakeDraft = ""; renderTodo(penaltyState()); return toast("答えが違います。新しい問題を解いてください"); }
     D.wakes.push({ date: d, ts: Date.now() }); wakeQ = null; wakeDraft = "";
     save(`起床チェック ${hm(Date.now())}`); render();
-    toast(Date.now() <= w.close ? `おはようございます。最初の授業は${hm(w.first)}です` : "打刻しました（時間を過ぎているので罰ポイントは付きます）"); return;
+    toast(Date.now() > w.close ? "打刻しました（時間を過ぎているので罰ポイントは付きます）" : w.alarm && Date.now() > w.alarm.ts + ALARM_GAP ? `打刻しました（アラームから10分を過ぎたので二度寝 +${ptsAt(d, "snooze")}点）` : `おはようございます。最初の授業は${hm(w.first)}です`); return;
   }
   if (a === "ks-later") { sheetSkipped.add(sheetTask); closeTaskSheet(); toast("初期設定のまま登録しています"); return; }
   if (a === "ks-none") { const k = D.tasks.find(x => x.id === sheetTask); if (k) { k.deleted = Date.now(); k.none = "user"; k.detailed = true; save(`今回は課題なし：${subjName(k.subjectId)}`); } closeTaskSheet(); render(); toast("今回は課題なしにしました"); return; }
@@ -1579,6 +1757,7 @@ document.addEventListener("input", e => {
   if (["rDen","rLate","rOff"].includes(id)) dirty.rule = true;
   if (id === "gAcc" || id === "gPhoto" || id === "gProof" || id === "gAuto" || id === "gWake") dirty.acc = true;
   if (id === "kKeep") dirty.keep = true;
+  if (id === "yEvery") dirty.study = true;
   if (id === "gGrace") dirty.grace = true;
   if (id === "rStart" || id === "rEnd" || id === "rGoal" || id.startsWith("rd-")) dirty.robo = true;
   if (id === "pOn" || id === "pSince" || id === "pTh" || id.startsWith("pp-")) dirty.pen = true;
@@ -1645,6 +1824,8 @@ document.addEventListener("submit", e => {
   }
   if (f.id === "geoForm") { tightLoose("位置・写真の設定", { maxAcc: Math.max(10, Math.min(500, +$("gAcc").value || 100)), photo: $("gPhoto").checked, taskProof: $("gProof").checked, autoTask: $("gAuto").checked, wakeOn: $("gWake").checked }); dirty.acc = false; return; }
   if (f.id === "keepForm") { tightLoose("写真を残す期間", { photoKeepDays: Math.max(0, +$("kKeep").value || 0) }); dirty.keep = false; usageAt = 0; return; }
+  if (f.id === "studyForm") return studyStart();
+  if (f.id === "studyCfg") { tightLoose("勉強の報告間隔", { studyEvery: Math.max(10, Math.min(60, Math.round(+$("yEvery").value || 25))) }); dirty.study = false; return; }
   if (f.id === "graceForm") { tightLoose("催促までの時間", { grace: Math.max(0, Math.min(90, +$("gGrace").value || 0)) }); dirty.grace = false; return; }
   if (f.id === "subForm") { const name = $("sName").value.trim(); if (!name) return; D.subjects.push({ id: rid(), name, hours: Math.max(1, +$("sHours").value || 60) }); save(); $("sName").value = ""; render(); toast(`${name} を追加しました。時間割にも入れてください`); return; }
   if (f.id === "roboForm") {
@@ -1703,6 +1884,7 @@ function isLooser(k, nv, ov) {
     case "limitDen": case "weekGoal": case "roboEnd": return nv < ov;
     case "photo": case "officialCounts": case "taskProof": case "autoTask": return ov && !nv;
     case "autoTaskDays": return nv > ov;
+    case "studyEvery": return nv > ov;      // 報告の間隔を長くする
     case "wakeOn": return ov && !nv;
     case "wakeBefore": return nv < ov;      // 起きる時刻を遅くする
     case "wakeGrace": return nv > ov;
@@ -1783,17 +1965,26 @@ function exportPayload() {
     offDays: D.offDays.slice(-60),
     tasks: D.tasks.filter(k => !k.deleted).slice(-100).map(k => ({ subject: k.subjectId ? subjName(k.subjectId) : "", title: k.title, due: k.due, done: k.done ? toLocalInput(k.done) : null }))
   };
+  { const ws2 = weekStart(), lw = addDays(ws2, -7), o = openStudy();
+    summary.study = { todayMin: Math.round(studyBetween(dayStart(), addDays(dayStart(), 1)) / 60000), weekHours: +hrs(studyBetween(ws2, addDays(ws2, 7))), lastWeekHours: +hrs(studyBetween(lw, ws2)),
+      everyMin: Math.round(studyEvery() / 60000), sessionsLast7d: D.study.filter(x => Date.now() - x.start < 7 * 864e5).length,
+      autoEndedLast7d: D.study.filter(x => x.auto && Date.now() - x.start < 7 * 864e5).length, rejectedLast14d: D.study.filter(x => x.verify === "ng" && Date.now() - x.start < 14 * 864e5).length,
+      now: o ? { subject: studyName(o), since: hm(o.start), reports: o.shots.length - 1, lateNow: studyDue(o).late } : null,
+      samplesPending: D.study.filter(x => x.verify === "pending" && x.sampleUp).slice(0, 3).map(x => ({ id: x.id, file: `study/${x.id}.jpg`, subject: studyName(x), date: ymd(new Date(x.start)), time: `${hm(x.start)}-${hm(x.end)}`, minutes: Math.round(studyMs(x) / 60000), reports: x.shots.length - 1 })) };
+    data.study = D.study.slice(-60).map(x => ({ start: toLocalInput(x.start), end: x.end ? toLocalInput(x.end) : null, subject: studyName(x), minutes: Math.round(studyMs(x) / 60000), reports: Math.max(0, x.shots.length - 1), verify: x.verify, auto: !!x.auto })); }
   const la = localAdvice(); summary.appAdvice = { headline: la.headline, items: la.items.map(x => x.text), plan: la.plan };
   summary.integrity = { flags: (D.flags || []).slice(-10).map(f => ({ date: f.date, type: penLabel(f.type), detail: f.detail })), pending: D.pending.map(c => ({ label: c.label, at: toLocalInput(c.at) })),
     wake: (() => { const w = wakeInfo(today()); const last7 = [...Array(7)].map((_, i) => ymd(new Date(addDays(dayStart(), -i - 1)))).map(wakeInfo).filter(Boolean);
-      return { today: w ? { wake: hm(w.wake), checked: w.log ? hm(w.log.ts) : null } : null, missedLast7d: last7.filter((x, i) => !(x.log && x.log.ts <= x.close)).length, classDaysLast7d: last7.length }; })(),
+      return { today: w ? { wake: hm(w.wake), checked: w.log ? hm(w.log.ts) : null, alarmStopped: w.alarm ? hm(w.alarm.ts) : null } : null, missedLast7d: last7.filter((x, i) => !(x.log && x.log.ts <= x.close)).length, classDaysLast7d: last7.length,
+        alarmDaysLast7d: last7.filter(x => x.alarm).length, snoozeLast7d: last7.filter(x => x.alarm && !(x.log && x.log.ts <= x.alarm.ts + ALARM_GAP) && x.log && x.log.ts <= x.close).length }; })(),
     noAssignmentLast14d: D.tasks.filter(k => k.none === "user" && Date.now() - k.deleted < 14 * 864e5).length,
     offDaysThisMonth: D.offDays.filter(x => x.startsWith(today().slice(0, 7))).length, cancelsLast30d: D.logs.filter(l => l.status === "cancel" && Date.now() - l.ts < 30 * 864e5).length };
   const audit = { ver: A.ver, len: A.len, head: A.head, entries: A.entries.slice(-120).map(e => ({ t: toLocalInput(e.t), a: e.a, sys: e.sys, p: e.p, h: e.h })) };
   return { app: "kintai", schema: 1, timezone: "Asia/Tokyo", summary, data, audit };
 }
 /* 記録の控え（写真以外のすべて）を state.json に置く。空の端末・別の開き方で鍵を入れると引き継げる */
-const isEmptyLocal = () => !D.sessions.length && !D.logs.length && !D.tasks.some(t => !(t.auto && !t.detailed && !t.done));
+const hasRecords = x => !!((x.sessions || []).length || (x.logs || []).length || (x.study || []).length || (x.wakes || []).length || (x.tasks || []).some(t => !(t.auto && !t.detailed && !t.done)));
+const isEmptyLocal = () => !hasRecords(D);
 async function pushState() {
   const body = JSON.stringify({ app: "kintai-state", savedAt: new Date().toISOString(), state: D });
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -1808,7 +1999,7 @@ async function pullState() {
   try {
     const r = await gh("state.json", { headers:{ Accept:"application/vnd.github.raw+json" } }); if (!r.ok) return false;
     const x = (JSON.parse(await r.text()) || {}).state;
-    if (!x || !Array.isArray(x.sessions) || !(x.sessions.length || (x.logs || []).length || (x.tasks || []).length)) return false;
+    if (!x || !Array.isArray(x.sessions) || !hasRecords(x)) return false;
     const g = D.guard, fl = D.flags; D = normalize(x); D.guard = g;
     const ids = new Set((D.flags || []).map(f => f.id)); D.flags = [...(D.flags || []), ...fl.filter(f => !ids.has(f.id))];
     save("GitHubから記録を引き継ぎ"); render();
@@ -1849,7 +2040,20 @@ async function uploadProofs() {
       if (r.ok || r.status === 422) { k.proofUp = true; changed = true; }
     } catch {}
   }
-  if (changed) save("課題の証拠をClaudeに送信", true);
+  /* 勉強：最初と最後の写真を左右に並べた1枚（各384×512以内）を送る。1晩に3件まで */
+  for (const x of (D.study || []).filter(t => t.verify === "pending" && !t.sampleUp && t.end && t.shots.length >= 2).slice(0, 3)) {
+    try {
+      const [a, b] = await Promise.all([x.shots[0], x.shots[x.shots.length - 1]].map(async sh => { const v = sh.photo && await idb.get(sh.photo); return v ? createImageBitmap(typeof v === "string" ? dataUrlToBlob(v) : v) : null; }));
+      if (!a || !b) { x.verify = "local"; changed = true; continue; }
+      const fit = bm => { const z = Math.min(384 / bm.width, 512 / bm.height, 1); return [Math.round(bm.width * z), Math.round(bm.height * z)]; };
+      const [aw, ah] = fit(a), [bw, bh] = fit(b), c = document.createElement("canvas");
+      c.width = aw + bw + 8; c.height = Math.max(ah, bh); const g = c.getContext("2d");
+      g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(a, 0, 0, aw, ah); g.drawImage(b, aw + 8, 0, bw, bh);
+      const r = await gh(`study/${encodeURIComponent(x.id)}.jpg`, { method:"PUT", headers:{ "Content-Type":"application/json" }, body: JSON.stringify({ message:`勉強の確認 ${x.id}`, content: c.toDataURL("image/jpeg", 0.6).split(",")[1] }) });
+      if (r.ok || r.status === 422) { x.sampleUp = true; changed = true; }
+    } catch {}
+  }
+  if (changed) save("課題・勉強の証拠をClaudeに送信", true);
   return changed;
 }
 /* Claudeの確認結果を反映。認められなかった課題は未提出に戻す */
@@ -1866,13 +2070,24 @@ function applyProofVerdicts(j) {
   if (changed) { save("Claudeの証拠確認を反映", true); render(); }
   if (ng.length) setTimeout(() => toast(`「${ng[0]}」の証拠写真が認められませんでした。撮り直して提出してください`), 400);
 }
+/* 勉強の確認結果：認められなかった勉強は時間に数えない */
+function applyStudyVerdicts(j) {
+  const P = j && j.study; if (!P || typeof P !== "object") return;
+  const ng = []; let changed = false;
+  for (const [id, v] of Object.entries(P)) {
+    const x = (D.study || []).find(t => t.id === id && t.verify === "pending"); if (!x || !v || typeof v.ok !== "boolean") continue;
+    changed = true; x.verify = v.ok ? "ok" : "ng"; if (!v.ok) { x.ng = String(v.reason || "勉強の成果が写っていない").slice(0, 40); ng.push(studyName(x)); }
+  }
+  if (changed) { save("Claudeの勉強確認を反映", true); render(); }
+  if (ng.length) setTimeout(() => toast(`「${ng[0]}」の勉強は認められませんでした（時間に数えません）`), 900);
+}
 async function fetchAdvice() {
   if (!SY.token || adviceBusy) return;
   adviceBusy = true;
   try {
     const r = await gh("advice.json", { headers:{ Accept:"application/vnd.github.raw+json" } });
     if (r.status === 404) SY.advice = null;
-    else if (r.ok) { let j = null; try { j = JSON.parse(await r.text()); } catch {} if (j && (j.headline || (j.items && j.items.length))) { SY.advice = j; applyClaudeIntegrity(j); applyProofVerdicts(j); } }
+    else if (r.ok) { let j = null; try { j = JSON.parse(await r.text()); } catch {} if (j && (j.headline || (j.items && j.items.length))) { SY.advice = j; applyClaudeIntegrity(j); applyProofVerdicts(j); applyStudyVerdicts(j); } }
     else throw r;
     SY.adviceAt = Date.now();
   } catch (e) { if (!SY.err) SY.err = await errText(e); }
@@ -1999,7 +2214,21 @@ if (!D.subjects.length && !Object.keys(D.tt).length) applyPreset(true);
 applyDuePending();
 checkClock();
 autoTasks();
-const openFromLink = () => { if ((location.hash || "").slice(1) === "wake") { setTab("punch"); setTimeout(() => { const el = $("wakeAns"); if (el) el.focus(); }, 300); return; } if ((location.hash || "").slice(1) === "kadai") { setTab("task"); sheetSkipped.clear(); maybeShowTaskSheet(true); } };
+closeStaleStudy();
+/* iPhoneのショートカット「アラームを停止したとき → URLを開く(#alarm)」から呼ばれる。止めた時刻を残し、10分以内の起床チェックを求める */
+function recordAlarm() {
+  try { history.replaceState(null, "", location.pathname + location.search); } catch {}   // 次のアラームでも hashchange が起きるように消す
+  const d = today(), now = Date.now(), w = wakeInfo(d);
+  setTab("punch");
+  if (!w) return toast("今日は起床チェックのない日です（アラームの記録はしません）");
+  if (now >= w.first) return toast("最初の授業が始まっているので、アラームは記録しません");
+  if (w.alarm || now < w.wake - 4 * 3600000) { render(); return setTimeout(() => { const el = $("wakeAns"); if (el) el.focus(); }, 300); }
+  D.alarms.push({ date: d, ts: now }); if (D.alarms.length > 120) D.alarms.splice(0, D.alarms.length - 120);
+  save(`アラーム停止 ${hm(now)}`); render();
+  toast(w.log ? "アラームを記録しました（起床チェックは済んでいます）" : `アラームを記録しました。${hm(now + ALARM_GAP)}までに起床チェックをしてください`);
+  setTimeout(() => { const el = $("wakeAns"); if (el) el.focus(); }, 300);
+}
+const openFromLink = () => { if ((location.hash || "").slice(1) === "alarm") return recordAlarm(); if ((location.hash || "").slice(1) === "wake") { setTab("punch"); setTimeout(() => { const el = $("wakeAns"); if (el) el.focus(); }, 300); return; } if ((location.hash || "").slice(1) === "kadai") { setTab("task"); sheetSkipped.clear(); maybeShowTaskSheet(true); } };
 window.addEventListener("hashchange", openFromLink);
 setTimeout(purgePhotos, 3000);
 $("cDate").value = today();
@@ -2011,10 +2240,10 @@ $("syRepo").value = SY.repo; $("syToken").value = SY.token;
 renderSync(); renderAdvice();
 setTimeout(() => { openFromLink(); maybeShowTaskSheet(); }, 500);
 if (SY.token) { pushRecords(!SY.stateSha); fetchAdvice(); }   // 控えがまだ無ければ必ず送る
-setInterval(tick, 1000);
-setInterval(() => { if (!document.hidden && Date.now() % 3600000 < 60000) purgePhotos(); if (!busy && !editing && !document.hidden) { checkClock(); if (applyDuePending() | autoTasks()) render(); maybeShowTaskSheet(); renderTodo(penaltyState()); renderAdvice(); renderTasks(); renderGuard(); } }, 60000);
+setInterval(() => { tick(); studyTick(); }, 1000);
+setInterval(() => { if (!document.hidden && Date.now() % 3600000 < 60000) purgePhotos(); if (!busy && !editing && !document.hidden) { checkClock(); if (applyDuePending() | autoTasks() | closeStaleStudy()) render(); renderStudy(); maybeShowTaskSheet(); renderTodo(penaltyState()); renderAdvice(); renderTasks(); renderGuard(); } }, 60000);
 window.addEventListener("storage", e => { if (e.key === KEY && !busy) { load(); render(); } });
-document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) { checkClock(); applyDuePending(); autoTasks(); setTimeout(() => maybeShowTaskSheet(), 400); punchMsg = null; $("todoMsg").hidden = true; $("classMsg").hidden = true; render(); if (SY.token) { pushRecords(false); if (Date.now() - SY.adviceAt > 120000) fetchAdvice(); } } });
+document.addEventListener("visibilitychange", () => { if (!document.hidden && !busy) { checkClock(); applyDuePending(); autoTasks(); closeStaleStudy(); if (openStudy()) keepAwake(true); setTimeout(() => maybeShowTaskSheet(), 400); punchMsg = null; $("todoMsg").hidden = true; $("classMsg").hidden = true; render(); if (SY.token) { pushRecords(false); if (Date.now() - SY.adviceAt > 120000) fetchAdvice(); } } });
 })();
 </script>
 </body>
