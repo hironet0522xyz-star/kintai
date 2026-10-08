@@ -393,6 +393,7 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
       <form class="form" id="geoForm">
         <div class="field narrow" style="flex-basis:200px"><label for="gAcc">GPS精度の上限（m）</label><input type="number" id="gAcc" min="10" max="500" required></div>
         <label class="check" style="flex-basis:100%"><input type="checkbox" id="gPhoto"> 打刻のときに写真の撮影を必須にする（その場のカメラのみ・アルバム不可）</label>
+        <label class="check" style="flex-basis:100%"><input type="checkbox" id="gWake"> 起床チェックをする（授業のある日、最初の授業の60分前に起きて30分以内に打刻）</label>
         <label class="check" style="flex-basis:100%"><input type="checkbox" id="gAuto"> 毎授業の後に課題を自動登録する（締切は2日後の23:59。その日のうちに内容を直せる）</label>
         <label class="check" style="flex-basis:100%"><input type="checkbox" id="gProof"> 課題の「提出した」に証拠の写真を必須にする（端末で簡単に確かめ、連携中は毎晩Claudeが軽く確認）</label>
         <button class="btn" type="submit">保存</button>
@@ -513,7 +514,7 @@ const ST = { present:["出席","ok"], late:["遅刻","warn"], early:["早退","w
 const ONSITE = ["present","late","early"];
 const FIT = { lat:33.695446, lon:130.4395 };   // 福岡工業大学（福岡市東区和白東3-30-1）
 const PLACE_DEF = { school:{ name:"福岡工業大学", lat:FIT.lat, lon:FIT.lon, radius:400, preset:true, fit:true }, lab:{ name:"作業場", lat:FIT.lat, lon:FIT.lon, radius:400, preset:true } };
-const CFG_DEF = { maxAcc:100, photo:true, taskProof:true, autoTask:true, autoTaskDays:2, photoKeepDays:60, camFacing:"user", limitDen:3, lateUnit:3, officialCounts:false, grace:15,
+const CFG_DEF = { wakeOn:true, wakeBefore:60, wakeGrace:30, maxAcc:100, photo:true, taskProof:true, autoTask:true, autoTaskDays:2, photoKeepDays:60, camFacing:"user", limitDen:3, lateUnit:3, officialCounts:false, grace:15,
   periods:[["09:00","10:30"],["10:40","12:10"],["13:00","14:30"],["14:40","16:10"],["16:20","17:50"]],
   roboDays:[1,4,5], roboStart:"18:00", roboEnd:"20:00", weekGoal:6 };
 const PEN_TYPES = [
@@ -527,6 +528,7 @@ const PEN_TYPES = [
   ["goal",   "週の作業目標に届かなかった", 3],
   ["overdue","課題の期限切れ（未提出）", 3, "2026-10-07"],
   ["latesub","課題の遅れ提出", 1, "2026-10-07"],
+  ["oversleep","起床チェックなし（起きる時刻から30分以内）", 2, "2026-10-09"],
   ["tamper", "改ざん・時計の巻き戻し（自動検知）", 5, "2026-10-07"],
   ["delete", "記録の削除（登録から10分以上たったもの）", 1, "2026-10-07"],
   ["clean",  "1週間ノーミス（ボーナス）", -2]
@@ -536,11 +538,11 @@ function penDef() { return { on:true, since: ymd(new Date(addDays(Date.now(), 1)
   menu:[{ id:"p1", name:"腕立て伏せ50回", cost:3 },{ id:"p2", name:"部室の掃除", cost:3 },{ id:"p3", name:"スマホゲーム1日禁止", cost:5 },{ id:"p4", name:"おやつ・ジュース1週間禁止", cost:8 }], paid:[] }; }
 
 /* ---------- 保存 ---------- */
-function blank() { return { v:2, places: JSON.parse(JSON.stringify(PLACE_DEF)), cfg: JSON.parse(JSON.stringify(CFG_DEF)), subjects:[], sessions:[], logs:[], tasks:[], tt:{}, offDays:[], flags:[], pending:[], penalty: penDef() }; }
+function blank() { return { v:2, places: JSON.parse(JSON.stringify(PLACE_DEF)), cfg: JSON.parse(JSON.stringify(CFG_DEF)), subjects:[], sessions:[], logs:[], tasks:[], wakes:[], tt:{}, offDays:[], flags:[], pending:[], penalty: penDef() }; }
 function normalize(x) {
   const b = blank();
   const p = { ...b.penalty, ...(x.penalty || {}) }; p.pts = { ...b.penalty.pts, ...((x.penalty || {}).pts || {}) };
-  return { ...b, ...x, v:2, places:{ ...b.places, ...(x.places || {}) }, cfg:{ ...b.cfg, ...(x.cfg || {}) }, tt: x.tt || {}, offDays: x.offDays || [], tasks: x.tasks || [], flags: x.flags || [], pending: x.pending || [], penalty: p };
+  return { ...b, ...x, v:2, places:{ ...b.places, ...(x.places || {}) }, cfg:{ ...b.cfg, ...(x.cfg || {}) }, tt: x.tt || {}, offDays: x.offDays || [], tasks: x.tasks || [], wakes: x.wakes || [], flags: x.flags || [], pending: x.pending || [], penalty: p };
 }
 let D = null, storageOk = true;
 let rawAtLoad = null;
@@ -572,9 +574,10 @@ function save(action, sys) {
  *  - 機能を変えたら APP_VERSION を上げる（更新の記録が監査ログに1行残る）。
  *  - 監査ログ（kintai.audit）の形式を変えるときも消さずに追記で移行する。長さが減るとClaudeが巻き戻しと判定する。
  */
-const APP_VERSION = "2026.10.07-copykey8";
+const APP_VERSION = "2026.10.08-wake9";
 const GOAL_VERIFIED_FROM = "2026-10-12";
-const AUTO_TASK_FROM = "2026-10-08";        // この日の授業から、授業後に課題を自動登録する（それより前には遡らない）   // この週から、週の目標は位置確認済みの作業時間だけで数える（それより前の週には遡らない）
+const AUTO_TASK_FROM = "2026-10-08";
+const WAKE_FROM = "2026-10-09";             // この日から起床チェックを始める（それより前には遡らない）        // この日の授業から、授業後に課題を自動登録する（それより前には遡らない）   // この週から、週の目標は位置確認済みの作業時間だけで数える（それより前の週には遡らない）
 const AUDIT_KEY = "kintai.audit", SEEN_KEY = "kintai.seen", DELAY_MS = 24 * 3600000, FREE_DELETE_MS = 10 * 60000;
 let A = { v:1, len:0, head:"0", ver:"", entries:[] };
 function cyrb53(str, seed = 0) {
@@ -758,6 +761,10 @@ function penaltyEvents() {
     const wd = new Date(t).getDay();
     if (dayOver && D.cfg.roboDays.includes(wd) && !D.sessions.some(s => ymd(new Date(s.start)) === d)) add(d, "noshow", "作業場への入室なし");
   }
+  for (let t = sinceMs, n = 0; ymd(new Date(t)) <= todayStr && n < 500; t = addDays(t, 1), n++) {
+    const d = ymd(new Date(t)), w = wakeInfo(d);
+    if (w && now > w.close && !(w.log && w.log.ts <= w.close)) add(d, "oversleep", w.log ? `${hm(w.log.ts)}に打刻（起きる時刻 ${hm(w.wake)}）` : `起きる時刻 ${hm(w.wake)}`);
+  }
   for (const k of D.tasks) {
     const due = fromLocalInput(k.due); if (!due || ymd(new Date(due)) < since) continue;
     const name = `${k.subjectId ? subjName(k.subjectId) + "：" : ""}${k.title}`;
@@ -860,6 +867,14 @@ function renderTodo(ps) {
     const daysLeft = 7 - ((new Date().getDay() + 6) % 7);
     if (left > 0) items.push({ lv: left / 3600000 > daysLeft * 3 ? "warn" : "info", t:`今週の目標まであと ${hrs(left)} 時間`, s:`目標 ${goal} 時間・今週は残り${daysLeft}日（日曜まで）` });
     else done.push(`今週の目標 ${goal} 時間 達成`);
+  }
+  { const w = wakeInfo(d);
+    if (w && !w.log && now >= w.open && now < w.first) {
+      const q = wakeQ || newWakeQ(), late = now > w.close;
+      items.unshift({ lv: late ? "crit" : now >= w.wake ? "warn" : "info", t: late ? `起床チェックの時刻（${hm(w.close)}まで）を過ぎました` : `起床チェック：${hm(w.wake)}に起きる（${hm(w.close)}まで）`,
+        s: late ? `罰ポイント +${ptsAt(d, "oversleep")}。打刻は記録として残せます` : `最初の授業は${hm(w.first)}。目を覚ますために足し算を1問：${q.a} + ${q.b} = ?`,
+        acts: `<input type="number" id="wakeAns" inputmode="numeric" style="width:100px" aria-label="答え" placeholder="答え" value="${esc(wakeDraft)}"><button class="btn sm primary" data-act="wake">起きた</button>` });
+    }
   }
   for (const k of D.tasks.filter(t => t.auto && !t.detailed && !t.done && !t.deleted && t.classDate === d)) {
     const due = fromLocalInput(k.due);
@@ -981,6 +996,17 @@ function renderClass() {
       ${l.note ? `<div class="note">${esc(l.note)}</div>` : ""}</div>`;
   }).join("") : `<p class="empty">まだ記録がありません</p>`;
 }
+/* ---------- 起床チェック ----------
+ * 授業のある日は「最初の授業の wakeBefore 分前」が起きる時刻。起きる時刻の2時間前から +wakeGrace 分までに
+ * 「起きた」を打刻する（足し算を1問解く）。間に合わなければ罰ポイント。 */
+function wakeInfo(d) {
+  if (D.cfg.wakeOn === false || isOff(d)) return null;
+  const sl = slotsOn(d); if (!sl.length) return null;
+  const first = Math.min(...sl.map(x => x.start)), wake = first - (+D.cfg.wakeBefore || 60) * 60000;
+  return { first, wake, open: wake - 120 * 60000, close: wake + (+D.cfg.wakeGrace || 30) * 60000, log: (D.wakes || []).find(w => w.date === d) };
+}
+let wakeQ = null, wakeDraft = "";
+function newWakeQ() { const a = 12 + Math.floor(Math.random() * 70), b = 7 + Math.floor(Math.random() * 25); wakeQ = { a, b }; return wakeQ; }
 /* ---------- 授業後の課題の自動登録 ----------
  * 授業が終わったら「科目の課題」を締切 autoTaskDays 日後 23:59 で登録する（同じ日の同じ科目は1件）。
  * その授業の日のうちは内容・締切を自由に直せる。「今回は課題なし」もその日のうちなら罰なし。 */
@@ -1144,7 +1170,7 @@ function renderSettings() {
       ${p.lat != null ? `<a class="btn sm" style="text-decoration:none;display:inline-flex;align-items:center" href="https://www.google.com/maps?q=${p.lat},${p.lon}" target="_blank" rel="noopener">地図で確認</a>` : ""}</div>
     </div>`;
   }).join("");
-  if (!dirty.acc) { $("gAcc").value = D.cfg.maxAcc; $("gPhoto").checked = !!D.cfg.photo; $("gProof").checked = D.cfg.taskProof !== false; $("gAuto").checked = D.cfg.autoTask !== false; }
+  if (!dirty.acc) { $("gAcc").value = D.cfg.maxAcc; $("gPhoto").checked = !!D.cfg.photo; $("gProof").checked = D.cfg.taskProof !== false; $("gAuto").checked = D.cfg.autoTask !== false; $("gWake").checked = D.cfg.wakeOn !== false; }
   if (!dirty.grace) $("gGrace").value = D.cfg.grace;
   $("subList").innerHTML = D.subjects.length ? D.subjects.map(s => `<div class="row"><span class="date">${s.hours}時間</span><div class="main"><b>${esc(s.name)}</b><span class="muted small">上限${Math.floor(s.hours / Math.max(1, D.cfg.limitDen))}時間</span></div><div>${delBtn("u:" + s.id, "sub-del", s.id)}</div></div>`).join("")
     : `<p class="empty">まだ科目がありません</p>`;
@@ -1498,6 +1524,14 @@ document.addEventListener("click", e => {
   if (a === "menu-del") { if (armed !== "menu:" + id) return arm("menu:" + id); armed = null; D.penalty.menu = D.penalty.menu.filter(m => m.id !== id); save(); render(); return; }
   if (a === "preset") return applyPreset(false);
   if (a === "task-done") return submitTask(id);
+  if (a === "wake") {
+    const d = today(), w = wakeInfo(d); if (!w || w.log) return;
+    const q = wakeQ || newWakeQ(), ans = +($("wakeAns") || {}).value;
+    if (ans !== q.a + q.b) { newWakeQ(); wakeDraft = ""; renderTodo(penaltyState()); return toast("答えが違います。新しい問題を解いてください"); }
+    D.wakes.push({ date: d, ts: Date.now() }); wakeQ = null; wakeDraft = "";
+    save(`起床チェック ${hm(Date.now())}`); render();
+    toast(Date.now() <= w.close ? `おはようございます。最初の授業は${hm(w.first)}です` : "打刻しました（時間を過ぎているので罰ポイントは付きます）"); return;
+  }
   if (a === "ks-later") { sheetSkipped.add(sheetTask); closeTaskSheet(); toast("初期設定のまま登録しています"); return; }
   if (a === "ks-none") { const k = D.tasks.find(x => x.id === sheetTask); if (k) { k.deleted = Date.now(); k.none = "user"; k.detailed = true; save(`今回は課題なし：${subjName(k.subjectId)}`); } closeTaskSheet(); render(); toast("今回は課題なしにしました"); return; }
   if (a === "ks-due") { $("ksDue").value = `${ymd(new Date(addDays(dayStart(), +b.dataset.days)))}T23:59`; return; }
@@ -1541,8 +1575,9 @@ document.addEventListener("input", e => {
   if (draft && ["eStart","eEnd","eNote"].includes(id)) draft[{ eStart:"start", eEnd:"end", eNote:"note" }[id]] = t.value;
   if (id === "punchNote") punchDraft = t.value;
   if (id === "teTitle" || id === "teDue" || id === "teNote") taskDraft[id] = t.value;
+  if (id === "wakeAns") wakeDraft = t.value;
   if (["rDen","rLate","rOff"].includes(id)) dirty.rule = true;
-  if (id === "gAcc" || id === "gPhoto" || id === "gProof" || id === "gAuto") dirty.acc = true;
+  if (id === "gAcc" || id === "gPhoto" || id === "gProof" || id === "gAuto" || id === "gWake") dirty.acc = true;
   if (id === "kKeep") dirty.keep = true;
   if (id === "gGrace") dirty.grace = true;
   if (id === "rStart" || id === "rEnd" || id === "rGoal" || id.startsWith("rd-")) dirty.robo = true;
@@ -1608,7 +1643,7 @@ document.addEventListener("submit", e => {
     pushRecords(true).then(() => { if (!SY.err) { if (!(before && !isEmptyLocal())) toast("接続できました。記録を送りました"); fetchAdvice(); } });
     return;
   }
-  if (f.id === "geoForm") { tightLoose("位置・写真の設定", { maxAcc: Math.max(10, Math.min(500, +$("gAcc").value || 100)), photo: $("gPhoto").checked, taskProof: $("gProof").checked, autoTask: $("gAuto").checked }); dirty.acc = false; return; }
+  if (f.id === "geoForm") { tightLoose("位置・写真の設定", { maxAcc: Math.max(10, Math.min(500, +$("gAcc").value || 100)), photo: $("gPhoto").checked, taskProof: $("gProof").checked, autoTask: $("gAuto").checked, wakeOn: $("gWake").checked }); dirty.acc = false; return; }
   if (f.id === "keepForm") { tightLoose("写真を残す期間", { photoKeepDays: Math.max(0, +$("kKeep").value || 0) }); dirty.keep = false; usageAt = 0; return; }
   if (f.id === "graceForm") { tightLoose("催促までの時間", { grace: Math.max(0, Math.min(90, +$("gGrace").value || 0)) }); dirty.grace = false; return; }
   if (f.id === "subForm") { const name = $("sName").value.trim(); if (!name) return; D.subjects.push({ id: rid(), name, hours: Math.max(1, +$("sHours").value || 60) }); save(); $("sName").value = ""; render(); toast(`${name} を追加しました。時間割にも入れてください`); return; }
@@ -1668,6 +1703,9 @@ function isLooser(k, nv, ov) {
     case "limitDen": case "weekGoal": case "roboEnd": return nv < ov;
     case "photo": case "officialCounts": case "taskProof": case "autoTask": return ov && !nv;
     case "autoTaskDays": return nv > ov;
+    case "wakeOn": return ov && !nv;
+    case "wakeBefore": return nv < ov;      // 起きる時刻を遅くする
+    case "wakeGrace": return nv > ov;
     case "photoKeepDays": return (nv || Infinity) < (ov || Infinity);
     case "roboDays": return ov.some(x => !nv.includes(x));
     default: return JSON.stringify(nv) !== JSON.stringify(ov);
@@ -1747,6 +1785,8 @@ function exportPayload() {
   };
   const la = localAdvice(); summary.appAdvice = { headline: la.headline, items: la.items.map(x => x.text), plan: la.plan };
   summary.integrity = { flags: (D.flags || []).slice(-10).map(f => ({ date: f.date, type: penLabel(f.type), detail: f.detail })), pending: D.pending.map(c => ({ label: c.label, at: toLocalInput(c.at) })),
+    wake: (() => { const w = wakeInfo(today()); const last7 = [...Array(7)].map((_, i) => ymd(new Date(addDays(dayStart(), -i - 1)))).map(wakeInfo).filter(Boolean);
+      return { today: w ? { wake: hm(w.wake), checked: w.log ? hm(w.log.ts) : null } : null, missedLast7d: last7.filter((x, i) => !(x.log && x.log.ts <= x.close)).length, classDaysLast7d: last7.length }; })(),
     noAssignmentLast14d: D.tasks.filter(k => k.none === "user" && Date.now() - k.deleted < 14 * 864e5).length,
     offDaysThisMonth: D.offDays.filter(x => x.startsWith(today().slice(0, 7))).length, cancelsLast30d: D.logs.filter(l => l.status === "cancel" && Date.now() - l.ts < 30 * 864e5).length };
   const audit = { ver: A.ver, len: A.len, head: A.head, entries: A.entries.slice(-120).map(e => ({ t: toLocalInput(e.t), a: e.a, sys: e.sys, p: e.p, h: e.h })) };
@@ -1863,6 +1903,7 @@ function localAdvice() {
   if (o && now - o.start > 14 * 3600000) { add("crit", `${md(o.start)} ${hm(o.start)}から退室していない。記録を直す`); bad = true; }
   else if (o && now > at(ymd(new Date(o.start)), D.cfg.roboEnd || "20:00")) { add("warn", `活動終了の${D.cfg.roboEnd}を過ぎた。帰る前に作業場で退室を打刻`); warn = true; plan = plan || "作業場で「退室」を打刻する"; }
   const off = isOff(d), slots = off ? [] : slotsOn(d);
+  { const w = wakeInfo(d); if (w && d >= WAKE_FROM && now > w.close && !(w.log && w.log.ts <= w.close)) { add("crit", `今朝は起床チェックに間に合わなかった（起きる時刻 ${hm(w.wake)}）。今夜は早めに寝る`); bad = true; } }
   const missed = slots.filter(s => !logFor(d, s) && now > s.start + D.cfg.grace * 60000);
   if (missed.length) { add("crit", `${missed.map(s => `${s.period}限 ${subjName(s.subjectId)}`).join("、")}が未記録。今日中に記録しないと1コマ+${P.pts.miss || 0}点`); bad = true; plan = plan || `${missed[0].period}限の記録を入れる（教室にいるなら打刻）`; }
   const next = slots.find(s => !logFor(d, s) && now <= s.start + D.cfg.grace * 60000);
@@ -1958,7 +1999,7 @@ if (!D.subjects.length && !Object.keys(D.tt).length) applyPreset(true);
 applyDuePending();
 checkClock();
 autoTasks();
-const openFromLink = () => { if ((location.hash || "").slice(1) === "kadai") { setTab("task"); sheetSkipped.clear(); maybeShowTaskSheet(true); } };
+const openFromLink = () => { if ((location.hash || "").slice(1) === "wake") { setTab("punch"); setTimeout(() => { const el = $("wakeAns"); if (el) el.focus(); }, 300); return; } if ((location.hash || "").slice(1) === "kadai") { setTab("task"); sheetSkipped.clear(); maybeShowTaskSheet(true); } };
 window.addEventListener("hashchange", openFromLink);
 setTimeout(purgePhotos, 3000);
 $("cDate").value = today();
