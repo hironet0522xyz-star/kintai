@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>トレッドミル歩数計</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;600;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#0f1115;--card:#181b22;--line:#262a33;--text:#eef0f4;--sub:#8b93a3;--acc:#c6ff3d;--acc2:#3dd6ff;--warn:#ff7a59}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:"Noto Sans JP",system-ui,sans-serif}
+body{padding:calc(env(safe-area-inset-top) + 12px) 16px calc(env(safe-area-inset-bottom) + 24px)}
+.wrap{max-width:460px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:center;margin:4px 0 10px}
+h1{font-size:17px;font-weight:800;margin:0;letter-spacing:.02em}
+h1 span{color:var(--acc)}
+.tabs{display:flex;gap:2px;background:var(--card);border-radius:999px;padding:3px;margin-bottom:12px}
+.tabs button{flex:1;border:0;background:none;color:var(--sub);font:600 13px "Noto Sans JP",sans-serif;padding:8px 0;border-radius:999px}
+.tabs button.on{background:var(--line);color:var(--text)}
+.mono{font-family:"JetBrains Mono",monospace}
+.card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin-bottom:12px}
+.ringbox{position:relative;width:220px;height:220px;margin:4px auto}
+.ringbox svg{transform:rotate(-90deg);width:220px;height:220px}
+.center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.steps{font-size:50px;font-weight:700;line-height:1}
+.lbl{color:var(--sub);font-size:12px}
+.goal{font-size:12px;color:var(--sub);margin-top:6px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;text-align:center;margin-top:10px}
+.stats b{display:block;font-size:17px}
+.stats span{font-size:10.5px;color:var(--sub)}
+.ctrl{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ctrl .val{text-align:center;flex:1}
+.ctrl .val b{font-size:34px}
+.ctrl .val small{color:var(--sub);font-size:12px;margin-left:3px}
+.rb{width:52px;height:52px;border-radius:14px;border:1px solid var(--line);background:#20242d;color:var(--text);font-size:24px;font-weight:600;font-family:inherit}
+.rb:active{background:var(--line)}
+.rb.s{width:42px;font-size:14px}
+.title{font-size:12px;color:var(--sub);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.chips{display:flex;gap:6px;margin-top:10px}
+.chips button{flex:1;border:1px solid var(--line);background:none;color:var(--text);border-radius:10px;padding:8px 0;font:500 13px "Noto Sans JP",sans-serif;min-width:44px}
+.chips.num button{font-family:"JetBrains Mono",monospace}
+.chips button.on{border-color:var(--acc);color:var(--acc)}
+.main{display:flex;gap:8px;margin:12px 0}
+.main button{flex:1;height:58px;border-radius:16px;border:0;font:800 17px "Noto Sans JP",sans-serif}
+.go{background:var(--acc);color:#111}
+.go.pause{background:#2a2f3a;color:var(--text)}
+.end{background:none!important;border:1px solid var(--line)!important;color:var(--sub);flex:.55!important}
+.end:not(:disabled){color:var(--warn);border-color:#4a2f2a!important}
+.row{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line);gap:10px}
+.row:last-child{border-bottom:0}
+.row label{font-size:14px}
+.row .hint{display:block;color:var(--sub);font-size:11px;margin-top:2px}
+.row input{width:96px;background:#11141a;border:1px solid var(--line);color:var(--text);border-radius:10px;padding:9px 10px;font:500 15px "JetBrains Mono",monospace;text-align:right}
+.btn2{border:1px solid var(--line);background:#20242d;color:var(--text);border-radius:12px;padding:10px 14px;font:600 13px "Noto Sans JP",sans-serif}
+.tap{width:100%;height:150px;border-radius:18px;border:2px dashed var(--line);background:#12151b;color:var(--text);font:800 22px "Noto Sans JP",sans-serif;margin-top:10px}
+.tap.live{border-color:var(--acc);border-style:solid}
+.note{font-size:12px;color:var(--sub);line-height:1.7}
+.hist .item{display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--line)}
+.hist .item:last-child{border-bottom:0}
+.hist .d{font-size:12px;color:var(--sub)}
+.hist .s{font-size:20px;font-weight:700}
+.hist .m{font-size:11px;color:var(--sub);text-align:right}
+.today{display:flex;justify-content:space-around;text-align:center}
+.today b{font-size:26px;display:block}
+.hidden{display:none!important}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 24px);transform:translateX(-50%);background:var(--acc);color:#111;padding:10px 18px;border-radius:999px;font-weight:700;font-size:14px;opacity:0;transition:.3s;pointer-events:none;z-index:20}
+.toast.show{opacity:1}
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:20px;z-index:10}
+.modal .card{width:100%;max-width:360px}
+.cam{position:relative;border-radius:14px;overflow:hidden;background:#0b0d11;aspect-ratio:4/3}
+.cam video{width:100%;height:100%;object-fit:cover;display:block}
+.cam .mir{transform:scaleX(-1)}
+.pill{position:absolute;left:10px;top:10px;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;background:rgba(0,0,0,.55);color:var(--sub)}
+.pill.on{color:#111;background:var(--acc)}
+.camx{position:absolute;right:10px;top:10px;border:0;border-radius:999px;background:rgba(0,0,0,.55);color:#fff;font:600 12px "Noto Sans JP",sans-serif;padding:5px 10px}
+.wave{width:100%;height:56px;display:block;margin-top:10px}
+.big{display:flex;align-items:baseline;justify-content:center;gap:6px;margin-top:4px}
+.big b{font-size:64px;line-height:1}
+.flash{animation:fl .25s}
+@keyframes fl{0%{color:var(--acc)}100%{color:var(--text)}}
+a{color:var(--acc2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header><h1>TREAD<span>STEP</span></h1><span class="lbl" id="todayHdr"></span></header>
+  <div class="tabs">
+    <button data-v="live" class="on">ライブ</button>
+    <button data-v="cam">動画</button>
+    <button data-v="run">速度</button>
+    <button data-v="hist">履歴</button>
+    <button data-v="set">設定</button>
+  </div>
+
+  <!-- LIVE -->
+  <section id="v-live">
+    <div class="card hidden" id="noCam">
+      <div style="font-weight:800;margin-bottom:6px">この画面ではカメラが使えません</div>
+      <div class="note" id="noCamMsg">Claudeのアプリ内ではカメラが制限されています。ブラウザ（Safari / Chrome）で次のページを開いてください。</div>
+      <div class="note mono" style="margin-top:8px;word-break:break-all"><a href="https://hironet0522xyz-star.github.io/kintai/treadstep/" target="_blank" rel="noopener">https://hironet0522xyz-star.github.io/kintai/treadstep/</a></div>
+    </div>
+    <div class="card">
+      <div class="cam" id="camBox">
+        <video id="lv" muted playsinline autoplay class="mir"></video>
+        <div class="pill" id="lvPill">カメラ停止中</div>
+        <button class="camx" id="flipBtn">⟲ 切替</button>
+        <div id="lvEmpty" class="note" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;padding:20px">スタートでカメラが起動します<br>上半身（顔〜肩）が映るように置いてください</div>
+      </div>
+      <canvas class="wave" id="lvWave"></canvas>
+      <div class="big"><b class="mono" id="lvSteps">0</b><span class="lbl">歩</span></div>
+      <div class="stats">
+        <div><b class="mono" id="lvTime">0:00</b><span>歩行時間</span></div>
+        <div><b class="mono" id="lvCad">0</b><span>歩/分</span></div>
+        <div><b class="mono" id="lvDist">0.00</b><span>km</span></div>
+        <div><b class="mono" id="lvKcal">0</b><span>kcal</span></div>
+      </div>
+      <div class="main" style="margin-bottom:0">
+        <button class="go" id="lvGo">スタート</button>
+        <button class="end" id="lvEnd" disabled>終了</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="row" style="padding-top:0"><label>速度<span class="hint">マシン表示に合わせると判定と距離が正確に</span></label>
+        <input id="lvSpeed" class="speedIn" type="number" inputmode="decimal" step="0.1" placeholder="km/h"></div>
+      <div class="title" style="margin:10px 0 0"><span>数え方の補正（感覚の2倍／半分のとき）</span></div>
+      <div class="chips" id="multChips">
+        <button data-m="0.5">÷2</button><button data-m="1" class="on">そのまま</button><button data-m="2">×2</button>
+      </div>
+    </div>
+    <p class="note">頭と肩が<b>1歩ごとに上下する動き</b>を画像から読み取って数えます。スマホはコンソールや手すりに立てかけて、顔〜肩がしっかり入るように置いてください。歩き始めから3秒ほどで数え始めます（その分はさかのぼって加算）。映像はどこにも送信されません。</p>
+  </section>
+
+  <!-- VIDEO -->
+  <section id="v-cam" class="hidden">
+    <div class="card">
+      <div class="note" style="margin-bottom:10px">撮影済みの動画（上半身が映ったもの）から歩数を数えます。</div>
+      <div class="row" style="padding-top:0"><label>撮影時の速度<span class="hint">だいたいでOK</span></label>
+        <input id="vSpeed" class="speedIn" type="number" inputmode="decimal" step="0.1" placeholder="km/h"></div>
+      <div class="cam" style="aspect-ratio:16/9;margin-top:10px">
+        <video id="vid" muted playsinline style="object-fit:contain"></video>
+        <div id="pvEmpty" class="note" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center">動画を選ぶとここに表示</div>
+      </div>
+      <label class="tap" style="display:flex;align-items:center;justify-content:center;height:64px;font-size:17px;cursor:pointer">
+        🎥 動画を撮る / 選ぶ<input id="vFile" type="file" accept="video/*" style="display:none">
+      </label>
+      <div class="main" style="margin:10px 0 0"><button id="anBtn" class="go" disabled>解析スタート</button></div>
+      <div id="prog" class="hidden" style="margin-top:12px">
+        <div style="height:8px;background:#232731;border-radius:99px;overflow:hidden"><div id="progBar" style="height:100%;width:0;background:var(--acc);transition:width .2s"></div></div>
+        <div class="note mono" id="progTxt" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="card hidden" id="vRes">
+      <div class="big"><b class="mono" id="vSteps">0</b><span class="lbl">歩</span></div>
+      <div class="stats">
+        <div><b class="mono" id="vTime">0:00</b><span>歩行時間</span></div>
+        <div><b class="mono" id="vCad">0</b><span>歩/分</span></div>
+        <div><b class="mono" id="vDist">-</b><span>km</span></div>
+        <div><b class="mono" id="vKcal">-</b><span>kcal</span></div>
+      </div>
+      <div class="title" style="margin-top:14px"><span>ピッチの推移（歩/分）</span></div>
+      <canvas id="vChart" style="width:100%;height:110px;display:block"></canvas>
+      <div class="chips" id="vMult">
+        <button data-m="0.5">÷2</button><button data-m="1" class="on">そのまま</button><button data-m="2">×2</button>
+      </div>
+      <div class="main" style="margin-bottom:0"><button id="vSave" class="go">記録に保存</button></div>
+    </div>
+  </section>
+
+  <!-- SPEED -->
+  <section id="v-run" class="hidden">
+    <div class="card">
+      <div class="ringbox">
+        <svg viewBox="0 0 240 240">
+          <circle cx="120" cy="120" r="104" fill="none" stroke="#232731" stroke-width="14"/>
+          <circle id="ring" cx="120" cy="120" r="104" fill="none" stroke="var(--acc)" stroke-width="14" stroke-linecap="round" stroke-dasharray="653.5" stroke-dashoffset="653.5" style="transition:stroke-dashoffset .4s"/>
+        </svg>
+        <div class="center">
+          <div class="lbl">歩数（推定）</div>
+          <div class="steps mono" id="steps">0</div>
+          <div class="goal mono" id="goalTxt"></div>
+        </div>
+      </div>
+      <div class="stats">
+        <div><b class="mono" id="time">0:00</b><span>時間</span></div>
+        <div><b class="mono" id="dist">0.00</b><span>km</span></div>
+        <div><b class="mono" id="kcal">0</b><span>kcal</span></div>
+        <div><b class="mono" id="spm">0</b><span>歩/分</span></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="title"><span>速度</span><span class="mono" id="pace">-</span></div>
+      <div class="ctrl">
+        <button class="rb s" data-sp="-1">−1</button><button class="rb" data-sp="-0.1">−</button>
+        <div class="val"><b class="mono" id="speed">5.0</b><small>km/h</small></div>
+        <button class="rb" data-sp="0.1">＋</button><button class="rb s" data-sp="1">+1</button>
+      </div>
+      <div class="chips num" id="presets"></div>
+    </div>
+    <div class="card">
+      <div class="title"><span>傾斜</span></div>
+      <div class="ctrl">
+        <button class="rb" data-in="-0.5">−</button>
+        <div class="val"><b class="mono" id="incline">0.0</b><small>%</small></div>
+        <button class="rb" data-in="0.5">＋</button>
+      </div>
+    </div>
+    <div class="main"><button class="go" id="startBtn">スタート</button><button class="end" id="endBtn" disabled>終了</button></div>
+    <p class="note">カメラを使わない簡易モード。「速度 × 時間 ÷ 歩幅」で推定します。</p>
+  </section>
+
+  <!-- HISTORY -->
+  <section id="v-hist" class="hidden">
+    <div class="card">
+      <div class="title"><span>今日</span></div>
+      <div class="today">
+        <div><b class="mono" id="tSteps">0</b><span class="lbl">歩</span></div>
+        <div><b class="mono" id="tDist">0.00</b><span class="lbl">km</span></div>
+        <div><b class="mono" id="tKcal">0</b><span class="lbl">kcal</span></div>
+      </div>
+    </div>
+    <div class="card hist">
+      <div class="title"><span>記録</span><button class="btn2" id="clearBtn" style="padding:4px 10px;font-size:11px">全削除</button></div>
+      <div id="histList"></div>
+    </div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section id="v-set" class="hidden">
+    <div class="card">
+      <div class="row"><label>身長<span class="hint">歩幅の自動計算に使用</span></label><input id="height" type="number" inputmode="decimal" placeholder="cm"></div>
+      <div class="row"><label>体重<span class="hint">消費カロリー計算に使用</span></label><input id="weight" type="number" inputmode="decimal" placeholder="kg"></div>
+      <div class="row"><label>目標歩数</label><input id="goal" type="number" inputmode="numeric"></div>
+      <div class="row"><label>歩幅（歩き）<span class="hint" id="walkHint"></span></label><input id="strideW" type="number" inputmode="decimal" placeholder="cm"></div>
+      <div class="row"><label>歩幅（走り）<span class="hint" id="runHint"></span></label><input id="strideR" type="number" inputmode="decimal" placeholder="cm"></div>
+    </div>
+    <div class="card">
+      <div class="title"><span>歩幅キャリブレーション</span></div>
+      <p class="note" style="margin:0">歩きながら<b>足が着くたびに</b>下のボタンをタップ。20歩ぶんで、今の速度（<b class="mono" id="calSpeed">5.0</b> km/h）から歩幅を割り出して保存します。</p>
+      <button class="tap" id="tapBtn">ここをタップして開始</button>
+      <div class="note mono" id="calRes" style="margin-top:8px"></div>
+    </div>
+    <p class="note">データはこの端末のブラウザ内にだけ保存されます。</p>
+  </section>
+</div>
+
+<div class="modal hidden" id="modal">
+  <div class="card">
+    <div style="font-weight:800;margin-bottom:8px" id="mTitle"></div>
+    <div class="note" id="mBody"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px">
+      <button class="btn2" id="mNo">キャンセル</button>
+      <button class="btn2" id="mYes" style="background:var(--acc);color:#111;border:0">OK</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ---- Step engine: vertical bob of upper body (row-profile shift) + autocorrelation cadence ----
+const Bob = (function(){
+  const R = 96, C = 64, FS = 30, MAXS = 8;
+
+  function profile(px){
+    const p = new Float64Array(R);
+    for (let y=0;y<R;y++){ let s=0; const o=y*C; for (let x=0;x<C;x++) s+=px[o+x]; p[y]=s/C; }
+    const g = new Float64Array(R-1); let m=0;
+    for (let y=0;y<R-1;y++){ g[y]=p[y+1]-p[y]; m+=g[y]; }
+    m/=R-1; let v=0; for (let y=0;y<R-1;y++){ g[y]-=m; v+=g[y]*g[y]; }
+    const sd=Math.sqrt(v/(R-1)); if (sd<1e-3) return null;
+    for (let y=0;y<R-1;y++) g[y]/=sd;
+    return g;
+  }
+  // how many rows did `cur` move down relative to `ref`
+  function shift(ref, cur){
+    const n=ref.length, sc=new Float64Array(2*MAXS+1);
+    for (let d=-MAXS; d<=MAXS; d++){
+      let s=0,c=0;
+      for (let y=Math.max(0,d); y<Math.min(n,n+d); y++){ s+=cur[y]*ref[y-d]; c++; }
+      sc[d+MAXS]=s/c;
+    }
+    let bi=0; for (let i=1;i<sc.length;i++) if (sc[i]>sc[bi]) bi=i;
+    let off=0;
+    if (bi>0 && bi<sc.length-1){ const a=sc[bi-1],b=sc[bi],c=sc[bi+1],den=a-2*b+c; if(den<0) off=0.5*(a-c)/den; }
+    return {d: bi-MAXS+off, q: sc[bi]};
+  }
+  function acfPeriod(x){
+    const n=x.length, kmin=Math.round(0.25*FS), kmax=Math.min(Math.round(1.4*FS), Math.floor(n*0.6));
+    if (kmax<=kmin+2) return null;
+    const r=new Float64Array(kmax+2);
+    for (let k=kmin-1;k<=kmax+1;k++){
+      let s=0,e1=0,e2=0;
+      for (let i=0;i+k<n;i++){ s+=x[i]*x[i+k]; e1+=x[i]*x[i]; e2+=x[i+k]*x[i+k]; }
+      r[k]=s/(Math.sqrt(e1*e2)||1);
+    }
+    let best=-1; const pk=[];
+    for (let k=kmin;k<=kmax;k++) if (r[k]>r[k-1]&&r[k]>=r[k+1]&&r[k]>0){ pk.push(k); if(r[k]>best) best=r[k]; }
+    if (!pk.length) return null;
+    const k=pk.find(p=>r[p]>=0.8*best);
+    const y0=r[k-1],y1=r[k],y2=r[k+1],den=y0-2*y1+y2;
+    const off=den!==0?Math.max(-0.5,Math.min(0.5,0.5*(y0-y2)/den)):0;
+    return {period:(k+off)/FS, conf:r[k]};
+  }
+
+  function create(opt){
+    opt = opt||{};
+    const st = {
+      steps:0, cadence:0, walking:false, conf:0, amp:0, k:1, mult:1, activeSec:0,
+      expCad: opt.expCad||0, series:[], trace:[]
+    };
+    let ref=null, refT=0, refPos=0, pos=0, lastT=null, slow=null, fast=0;
+    let buf=[], lastEval=-1, periods=[], P=0, walkSince=null;
+    const MINAMP = opt.minAmp ?? 0.12;
+
+    function evaluate(t){
+      const t0=t-6; const pts=buf.filter(b=>b.t>=t0);
+      if (pts.length<20 || pts[pts.length-1].t-pts[0].t<3.5){ st.walking=false; return; }
+      const a=pts[0].t, n=Math.floor((t-a)*FS); const x=new Float64Array(n);
+      let j=0; for (let i=0;i<n;i++){ const tt=a+i/FS; while(j<pts.length-2&&pts[j+1].t<tt) j++;
+        const p0=pts[j],p1=pts[j+1]||p0, w=p1.t>p0.t?Math.min(Math.max((tt-p0.t)/(p1.t-p0.t),0),1):0; x[i]=p0.v*(1-w)+p1.v*w; }
+      let m=0; for(const v of x) m+=v; m/=n; let s2=0; for(let i=0;i<n;i++){x[i]-=m; s2+=x[i]*x[i];}
+      st.amp=Math.sqrt(s2/n);
+      const r=acfPeriod(x);
+      st.conf=r?r.conf:0;
+      const ok = r && r.conf>=0.35 && st.amp>=MINAMP;
+      if (ok){
+        periods.push(r.period); if (periods.length>5) periods.shift();
+        const srt=[...periods].sort((a,b)=>a-b); P=srt[Math.floor(srt.length/2)];
+        let k=1; if (st.expCad && 60/P < 0.65*st.expCad) k=2;
+        st.k=k;
+        if (!st.walking){ st.walking=true; const bf=Math.min(3, t-(walkSince??t)); st.steps += bf*k*st.mult/P; st.activeSec += bf; }
+      } else {
+        if (st.walking) periods=[];
+        st.walking=false; walkSince=null;
+      }
+      if (st.walking) st.cadence = 60*st.k*st.mult/P; else st.cadence=0;
+      st.series.push({t, cad:st.cadence});
+    }
+
+    st.push = function(t, px){
+      const g=profile(px); if(!g) return;
+      if (!ref || t-refT>1.0){ if(ref){ const s=shift(ref,g); if(s.q>0.3) pos=refPos+s.d; } ref=g; refT=t; refPos=pos; }
+      else { const s=shift(ref,g); if (s.q>0.3) pos=refPos+s.d; }
+      const dt = lastT==null?0:Math.min(t-lastT,0.5); lastT=t;
+      if (slow==null){ slow=pos; fast=0; }
+      slow += (pos-slow)*(1-Math.exp(-dt/0.8));
+      const hp=pos-slow; fast += (hp-fast)*(1-Math.exp(-dt/0.04));
+      buf.push({t, v:fast}); while(buf.length && buf[0].t<t-8) buf.shift();
+      st.trace.push(fast); if (st.trace.length>150) st.trace.shift();
+      if (Math.abs(fast) > MINAMP && walkSince==null) walkSince=t;
+      if (t-lastEval>=0.5){ lastEval=t; evaluate(t); }
+      if (st.walking && P>0){ st.steps += dt*st.k*st.mult/P; st.activeSec += dt; }
+    };
+    return st;
+  }
+  return {create, R, C};
+})();
+if (typeof module!=='undefined') module.exports = Bob;
+
+</script>
+<script>
+(function(){
+const $=id=>document.getElementById(id);
+const store={
+  get(k,d){try{const v=localStorage.getItem('ts_'+k);return v?JSON.parse(v):d}catch(e){return d}},
+  set(k,v){try{localStorage.setItem('ts_'+k,JSON.stringify(v))}catch(e){}}
+};
+const cfg=Object.assign({height:165,weight:60,goal:8000,strideW:null,strideR:null,speed:5.0,incline:0},store.get('cfg',{}));
+let hist=store.get('hist',[]);
+const RUN_SPEED=8;
+function save(){store.set('cfg',cfg)}
+function stride(speed){const run=speed>=RUN_SPEED;const v=run?cfg.strideR:cfg.strideW;if(v)return v/100;return (cfg.height||165)*(run?0.65:0.45)/100;}
+function strideByCad(c){const run=c>=140;const v=run?cfg.strideR:cfg.strideW;return v?v/100:(cfg.height||165)*(run?0.65:0.45)/100;}
+function kcalPerMin(speed,grade){const m=speed*1000/60,g=grade/100;
+  const vo2=speed>=RUN_SPEED?3.5+0.2*m+0.9*m*g:3.5+0.1*m+1.8*m*g;return vo2*(cfg.weight||60)/200;}
+function expCad(){return cfg.speed>0?cfg.speed*1000/60/stride(cfg.speed):0}
+function fmtT(t){t=Math.max(0,Math.floor(t));const h=Math.floor(t/3600),m=Math.floor(t%3600/60),x=t%60;
+  return h?`${h}:${String(m).padStart(2,'0')}:${String(x).padStart(2,'0')}`:`${m}:${String(x).padStart(2,'0')}`}
+function ask(t,b,yes){$('mTitle').textContent=t;$('mBody').innerHTML=b;$('modal').classList.remove('hidden');
+  $('mYes').onclick=()=>{$('modal').classList.add('hidden');yes()};$('mNo').onclick=()=>$('modal').classList.add('hidden');}
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1800)}
+function addHist(e){hist.unshift(e);hist=hist.slice(0,300);store.set('hist',hist);renderHist();toast('保存しました')}
+// distance / kcal from steps+time
+function derive(steps,sec,cad){
+  if(cfg.speed>0) return {km:cfg.speed*sec/3600, kcal:kcalPerMin(cfg.speed,cfg.incline)*sec/60};
+  const km=steps*strideByCad(cad)/1000; const sp=sec>0?km/(sec/3600):0;
+  return {km, kcal:sp>0?kcalPerMin(sp,cfg.incline)*sec/60:0};
+}
+// speed inputs shared
+function syncSpeedInputs(){document.querySelectorAll('.speedIn').forEach(i=>{if(document.activeElement!==i)i.value=cfg.speed||''})}
+document.querySelectorAll('.speedIn').forEach(i=>i.addEventListener('change',()=>{const v=parseFloat(i.value);
+  if(isFinite(v)&&v>=0){cfg.speed=Math.round(v*10)/10;save();syncSpeedInputs();renderCtrl();if(live.eng)live.eng.expCad=expCad();if(vLast)showRes();}}));
+
+// ================= LIVE =================
+const G_R=Bob.R, G_C=Bob.C;
+const gcv=document.createElement('canvas'); gcv.width=G_C; gcv.height=G_R;
+const gcx=gcv.getContext('2d',{willReadFrequently:true});
+function grayOf(src,W,H){
+  try{gcx.drawImage(src,0,0,W,H,0,0,G_C,G_R);}catch(e){return null}
+  const d=gcx.getImageData(0,0,G_C,G_R).data, px=new Float32Array(G_C*G_R);
+  for(let i=0;i<px.length;i++) px[i]=0.299*d[i*4]+0.587*d[i*4+1]+0.114*d[i*4+2];
+  return px;
+}
+const live={stream:null,facing:'user',eng:null,running:false,base:{steps:0,sec:0},lastShown:0,wake:null,mult:1,loopId:0};
+const lv=$('lv');
+const camOK=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
+async function startCam(){
+  if(live.stream) return true;
+  if(!camOK) throw new Error('nocam');
+  live.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:live.facing,width:{ideal:640},height:{ideal:480},frameRate:{ideal:30}},audio:false});
+  lv.srcObject=live.stream; lv.classList.toggle('mir',live.facing==='user');
+  await lv.play().catch(()=>{});
+  $('lvEmpty').classList.add('hidden');
+  return true;
+}
+function stopCam(){ if(live.stream){live.stream.getTracks().forEach(t=>t.stop());live.stream=null;} lv.srcObject=null; $('lvEmpty').classList.remove('hidden'); $('lvPill').textContent='カメラ停止中'; $('lvPill').classList.remove('on'); }
+async function wakeOn(){try{if('wakeLock' in navigator) live.wake=await navigator.wakeLock.request('screen');}catch(e){}}
+function wakeOff(){try{live.wake&&live.wake.release();}catch(e){} live.wake=null;}
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden&&live.running){wakeOn(); lv.play().catch(()=>{});} });
+function liveTotal(){const e=live.eng; return {steps:live.base.steps+(e?e.steps:0), sec:live.base.sec+(e?e.activeSec:0)}}
+function liveLoop(){
+  const id=++live.loopId;
+  const step=()=>{
+    if(id!==live.loopId) return;
+    if(live.running && lv.videoWidth){
+      const px=grayOf(lv,lv.videoWidth,lv.videoHeight);
+      if(px) live.eng.push(performance.now()/1000,px);
+      renderLive();
+    }
+    if('requestVideoFrameCallback' in lv) lv.requestVideoFrameCallback(step); else requestAnimationFrame(step);
+  };
+  if('requestVideoFrameCallback' in lv) lv.requestVideoFrameCallback(step); else requestAnimationFrame(step);
+}
+function renderLive(){
+  const e=live.eng, tot=liveTotal(), n=Math.floor(tot.steps);
+  const el=$('lvSteps'); if(n!==live.lastShown){el.textContent=n.toLocaleString(); el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); live.lastShown=n;}
+  $('lvTime').textContent=fmtT(tot.sec);
+  $('lvCad').textContent=e&&e.walking?Math.round(e.cadence):0;
+  const d=derive(tot.steps,tot.sec,e?e.cadence:0);
+  $('lvDist').textContent=d.km.toFixed(2); $('lvKcal').textContent=Math.round(d.kcal);
+  const p=$('lvPill');
+  if(!live.running){p.textContent=live.stream?'一時停止中':'カメラ停止中';p.classList.remove('on');}
+  else if(e&&e.walking){p.textContent='● 歩行を検出中';p.classList.add('on');}
+  else {p.textContent='待機中（動きを探しています）';p.classList.remove('on');}
+  drawWave(e?e.trace:[]);
+}
+function drawWave(tr){
+  const c=$('lvWave'),dpr=window.devicePixelRatio||1,W=c.clientWidth,H=56;
+  if(c.width!==W*dpr){c.width=W*dpr;c.height=H*dpr;}
+  const g=c.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
+  g.strokeStyle='#262a33'; g.beginPath(); g.moveTo(0,H/2); g.lineTo(W,H/2); g.stroke();
+  if(tr.length<2) return;
+  let mx=1.5; for(const v of tr) mx=Math.max(mx,Math.abs(v));
+  g.strokeStyle=live.eng&&live.eng.walking?'#c6ff3d':'#8b93a3'; g.lineWidth=2; g.beginPath();
+  tr.forEach((v,i)=>{const x=W*i/149, y=H/2+v/mx*(H/2-4); i?g.lineTo(x,y):g.moveTo(x,y)}); g.stroke();
+}
+function newEngine(){const e=Bob.create({expCad:expCad()}); e.mult=live.mult; return e;}
+$('lvGo').onclick=async()=>{
+  if(!live.running){
+    try{ await startCam(); }catch(err){
+      $('noCam').classList.remove('hidden');
+      if(err&&err.name==='NotAllowedError'&&!/claude\.ai|claudeusercontent/.test(location.host+document.referrer)) $('noCamMsg').textContent='カメラの使用が許可されませんでした。ブラウザの設定でこのサイトのカメラを許可してから再度お試しください。';
+      return;
+    }
+    if(live.eng){ const e=live.eng; live.base.steps+=e.steps; live.base.sec+=e.activeSec; }
+    live.eng=newEngine(); live.running=true; liveLoop(); wakeOn();
+    $('lvGo').textContent='一時停止'; $('lvGo').classList.add('pause'); $('lvEnd').disabled=false;
+  } else {
+    live.running=false; $('lvGo').textContent='再開'; $('lvGo').classList.remove('pause'); renderLive();
+  }
+};
+$('lvEnd').onclick=()=>{
+  const tot=liveTotal();
+  ask('終了しますか？',`${Math.floor(tot.steps).toLocaleString()}歩・${fmtT(tot.sec)}<br>記録として保存します。`,()=>{
+    live.running=false; live.loopId++; wakeOff();
+    if(tot.steps>=1){const d=derive(tot.steps,tot.sec,tot.sec?tot.steps/tot.sec*60:0);
+      addHist({t:Date.now()-tot.sec*1000,sec:Math.round(tot.sec),m:Math.round(d.km*1000),st:Math.floor(tot.steps),k:Math.round(d.kcal),src:'live'});}
+    live.eng=null; live.base={steps:0,sec:0}; live.lastShown=-1; stopCam();
+    $('lvGo').textContent='スタート'; $('lvGo').classList.remove('pause'); $('lvEnd').disabled=true; renderLive();
+  });
+};
+$('flipBtn').onclick=async()=>{
+  live.facing=live.facing==='user'?'environment':'user';
+  if(live.stream){ live.stream.getTracks().forEach(t=>t.stop()); live.stream=null; try{await startCam();}catch(e){} }
+};
+$('multChips').onclick=e=>{const b=e.target.closest('button');if(!b)return;live.mult=+b.dataset.m;
+  document.querySelectorAll('#multChips button').forEach(x=>x.classList.toggle('on',x===b));
+  if(live.eng) live.eng.mult=live.mult;};
+if(!camOK) $('noCam').classList.remove('hidden');
+
+// ================= VIDEO FILE =================
+const vid=$('vid'); let vRun=null, vLast=null, vMult=1;
+$('vFile').onchange=()=>{
+  const f=$('vFile').files[0]; if(!f) return;
+  if(vRun){vRun.stop=true;vid.pause();vRun=null;}
+  try{URL.revokeObjectURL(vid.src)}catch(e){}
+  vid.src=URL.createObjectURL(f); vid._file=f; $('pvEmpty').style.display='none';
+  $('anBtn').disabled=true; $('anBtn').textContent='解析スタート'; $('vRes').classList.add('hidden'); $('prog').classList.add('hidden');
+  vid.onloadedmetadata=()=>{vid.currentTime=Math.min(1,(vid.duration||2)/3)};
+  vid.onseeked=()=>{$('anBtn').disabled=false;vid.onseeked=null};
+  vid.onerror=()=>{$('pvEmpty').style.display='flex';$('pvEmpty').textContent='この動画は読み込めませんでした'};
+};
+$('anBtn').onclick=async()=>{
+  if(vRun){vRun.stop=true;vid.pause();vid.playbackRate=1;vRun=null;$('anBtn').textContent='解析スタート';$('progTxt').textContent='中止しました';return;}
+  if(!vid.videoWidth) return;
+  const run=vRun={eng:Bob.create({expCad:expCad()}),last:-1,stop:false,t0:performance.now()};
+  $('anBtn').textContent='中止'; $('prog').classList.remove('hidden'); $('vRes').classList.add('hidden');
+  vid.pause(); vid.currentTime=0;
+  await new Promise(r=>{const h=()=>{vid.removeEventListener('seeked',h);r()};vid.addEventListener('seeked',h);setTimeout(r,800)});
+  try{vid.playbackRate=4}catch(e){try{vid.playbackRate=2}catch(_){}}
+  const dur=vid.duration;
+  const onFrame=t=>{
+    if(run.stop) return;
+    if(t>run.last+0.02){run.last=t;const px=grayOf(vid,vid.videoWidth,vid.videoHeight);if(px)run.eng.push(t,px);}
+    const p=Math.min(t/dur,1);$('progBar').style.width=(p*100).toFixed(1)+'%';
+    const el=(performance.now()-run.t0)/1000,eta=p>0.02?el/p-el:0;
+    $('progTxt').textContent=`解析中 ${fmtT(t)} / ${fmtT(dur)}　${Math.floor(run.eng.steps)}歩`+(eta?`　残り約${fmtT(eta)}`:'');
+  };
+  if('requestVideoFrameCallback' in vid){const cb=(n,m)=>{onFrame(m.mediaTime);if(!run.stop&&!vid.ended)vid.requestVideoFrameCallback(cb)};vid.requestVideoFrameCallback(cb);}
+  else{const loop=()=>{if(run.stop||vid.ended)return;if(!vid.paused)onFrame(vid.currentTime);requestAnimationFrame(loop)};requestAnimationFrame(loop);}
+  vid.onended=()=>{
+    if(run.stop) return; run.stop=true; vRun=null; vid.playbackRate=1;
+    $('anBtn').textContent='もう一度解析'; $('progBar').style.width='100%'; $('progTxt').textContent='完了';
+    const f=vid._file; let start=f&&f.lastModified?f.lastModified-dur*1000:Date.now(); if(start>Date.now())start=Date.now();
+    vLast={steps:run.eng.steps,sec:run.eng.activeSec,series:run.eng.series,dur,start}; vMult=1;
+    document.querySelectorAll('#vMult button').forEach(x=>x.classList.toggle('on',x.dataset.m==='1'));
+    showRes();
+  };
+  try{await vid.play()}catch(e){run.stop=true;vRun=null;$('anBtn').textContent='解析スタート';$('progTxt').textContent='再生できませんでした。もう一度押してください。'}
+};
+function showRes(){
+  const steps=Math.round(vLast.steps*vMult), sec=vLast.sec, cad=sec?steps/sec*60:0;
+  $('vRes').classList.remove('hidden');
+  $('vSteps').textContent=steps.toLocaleString(); $('vTime').textContent=fmtT(sec); $('vCad').textContent=Math.round(cad);
+  const d=derive(steps,sec,cad); vLast.km=d.km; vLast.kcal=d.kcal; vLast.final=steps;
+  $('vDist').textContent=d.km.toFixed(2); $('vKcal').textContent=Math.round(d.kcal);
+  drawChart(vLast.series.map(p=>({t:p.t,cad:p.cad*vMult})),vLast.dur);
+  $('vSave').disabled=false; $('vSave').textContent='記録に保存';
+  if(!steps) $('progTxt').textContent='歩行を検出できませんでした。顔〜肩がはっきり映る角度で、スマホを固定して撮り直してください。';
+}
+function drawChart(s,dur){
+  const c=$('vChart'),dpr=window.devicePixelRatio||1,W=c.clientWidth,H=110;
+  c.width=W*dpr;c.height=H*dpr;const g=c.getContext('2d');g.scale(dpr,dpr);g.clearRect(0,0,W,H);
+  const mx=Math.max(60,...s.map(p=>p.cad))*1.15;
+  g.strokeStyle='#262a33';g.lineWidth=1;g.fillStyle='#8b93a3';g.font='10px JetBrains Mono, monospace';
+  [0.5,1].forEach(f=>{const y=H-18-(H-26)*f*0.87;g.beginPath();g.moveTo(28,y);g.lineTo(W,y);g.stroke();g.fillText(Math.round(mx*f*0.87),0,y+3)});
+  g.fillText('0:00',28,H-4);const e=fmtT(dur);g.fillText(e,W-g.measureText(e).width,H-4);
+  if(!s.length)return;g.strokeStyle='#c6ff3d';g.lineWidth=2;g.lineJoin='round';g.beginPath();
+  s.forEach((p,i)=>{const x=28+(W-28)*p.t/dur,y=H-18-(H-26)*p.cad/mx;i?g.lineTo(x,y):g.moveTo(x,y)});g.stroke();
+}
+$('vMult').onclick=e=>{const b=e.target.closest('button');if(!b||!vLast)return;vMult=+b.dataset.m;
+  document.querySelectorAll('#vMult button').forEach(x=>x.classList.toggle('on',x===b));showRes();};
+$('vSave').onclick=()=>{if(!vLast||!vLast.final)return;
+  addHist({t:vLast.start,sec:Math.round(vLast.sec),m:Math.round(vLast.km*1000),st:vLast.final,k:Math.round(vLast.kcal),src:'vid'});
+  $('vSave').disabled=true;$('vSave').textContent='保存済み';};
+
+// ================= SPEED MODE =================
+const PRESETS=[3,4,5,6,8,10];
+let s=null,running=false,lastT=0,timer=null;
+function tick(){const now=performance.now(),dt=Math.min((now-lastT)/1000,3600);lastT=now;const sp=cfg.speed,dm=sp*1000/3600*dt;
+  s.sec+=dt;s.meters+=dm;s.steps+=dm/stride(sp);s.kcal+=kcalPerMin(sp,cfg.incline)*dt/60;render();}
+function render(){const st=s?Math.floor(s.steps):0;$('steps').textContent=st.toLocaleString();$('time').textContent=fmtT(s?s.sec:0);
+  $('dist').textContent=((s?s.meters:0)/1000).toFixed(2);$('kcal').textContent=Math.round(s?s.kcal:0);
+  $('spm').textContent=running&&cfg.speed>0?Math.round(expCad()):0;$('goalTxt').textContent='目標 '+Number(cfg.goal||0).toLocaleString();
+  const p=cfg.goal?Math.min(st/cfg.goal,1):0;$('ring').style.strokeDashoffset=653.5*(1-p);}
+function renderCtrl(){$('speed').textContent=cfg.speed.toFixed(1);$('calSpeed').textContent=cfg.speed.toFixed(1);$('incline').textContent=cfg.incline.toFixed(1);
+  if(cfg.speed>0){const pm=60/cfg.speed,m=Math.floor(pm),x=Math.round((pm-m)*60);$('pace').textContent=`${m}'${String(x).padStart(2,'0')}"/km`}else $('pace').textContent='-';
+  document.querySelectorAll('#presets button').forEach(b=>b.classList.toggle('on',+b.dataset.v===cfg.speed));syncSpeedInputs();render();}
+$('presets').innerHTML=PRESETS.map(v=>`<button data-v="${v}">${v.toFixed(1)}</button>`).join('');
+$('presets').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(running)tick();cfg.speed=+b.dataset.v;save();renderCtrl()};
+document.querySelectorAll('[data-sp]').forEach(b=>b.onclick=()=>{if(running)tick();cfg.speed=Math.max(0,Math.min(25,Math.round((cfg.speed+ +b.dataset.sp)*10)/10));save();renderCtrl()});
+document.querySelectorAll('[data-in]').forEach(b=>b.onclick=()=>{if(running)tick();cfg.incline=Math.max(0,Math.min(20,Math.round((cfg.incline+ +b.dataset.in)*10)/10));save();renderCtrl()});
+$('startBtn').onclick=()=>{if(!running){if(!s)s={start:Date.now(),sec:0,meters:0,steps:0,kcal:0};running=true;lastT=performance.now();timer=setInterval(tick,250);
+  $('startBtn').textContent='一時停止';$('startBtn').classList.add('pause');$('endBtn').disabled=false;}
+  else{tick();running=false;clearInterval(timer);$('startBtn').textContent='再開';$('startBtn').classList.remove('pause');}render();};
+$('endBtn').onclick=()=>{if(running)tick();const sum=s?`${Math.floor(s.steps).toLocaleString()}歩・${(s.meters/1000).toFixed(2)}km・${fmtT(s.sec)}`:'';
+  ask('終了しますか？',sum+'<br>記録として保存します。',()=>{running=false;clearInterval(timer);
+    if(s&&s.steps>=1)addHist({t:s.start,sec:Math.round(s.sec),m:Math.round(s.meters),st:Math.floor(s.steps),k:Math.round(s.kcal)});
+    s=null;$('startBtn').textContent='スタート';$('startBtn').classList.remove('pause');$('endBtn').disabled=true;render();});};
+
+// ================= HISTORY =================
+const SRC={live:' 📷',vid:' 🎥'};
+function renderHist(){
+  const d0=new Date();d0.setHours(0,0,0,0);const td=hist.filter(h=>h.t>=d0.getTime());
+  const ts=td.reduce((a,h)=>a+h.st,0);
+  $('tSteps').textContent=ts.toLocaleString();$('tDist').textContent=(td.reduce((a,h)=>a+h.m,0)/1000).toFixed(2);$('tKcal').textContent=td.reduce((a,h)=>a+h.k,0);
+  $('todayHdr').textContent=ts?`今日 ${ts.toLocaleString()}歩`:'';
+  $('histList').innerHTML=hist.length?hist.map(h=>{const d=new Date(h.t);
+    return `<div class="item"><div><div class="d">${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}</div>
+    <div class="s mono">${h.st.toLocaleString()}<span class="lbl"> 歩${SRC[h.src]||''}</span></div></div>
+    <div class="m mono">${fmtT(h.sec)}<br>${(h.m/1000).toFixed(2)} km<br>${h.k} kcal</div></div>`}).join(''):'<div class="note">まだ記録がありません</div>';
+}
+$('clearBtn').onclick=()=>ask('履歴をすべて削除しますか？','この操作は元に戻せません。',()=>{hist=[];store.set('hist',hist);renderHist()});
+
+// ================= SETTINGS =================
+const fields=['height','weight','goal','strideW','strideR'];
+function fillSet(){fields.forEach(f=>$(f).value=cfg[f]??'');
+  $('walkHint').textContent=cfg.strideW?'設定済み':`空欄なら身長×0.45（${Math.round((cfg.height||165)*0.45)}cm）`;
+  $('runHint').textContent=cfg.strideR?'8km/h以上で使用（設定済み）':`空欄なら身長×0.65（${Math.round((cfg.height||165)*0.65)}cm）`;}
+fields.forEach(f=>$(f).addEventListener('change',()=>{const v=parseFloat($(f).value);
+  cfg[f]=isFinite(v)&&v>0?v:(f==='strideW'||f==='strideR'?null:cfg[f]);save();fillSet();render()}));
+let taps=[];const NEED=20;
+$('tapBtn').addEventListener('pointerdown',e=>{e.preventDefault();const b=$('tapBtn'),now=performance.now();
+  if(taps.length&&now-taps[taps.length-1]>2500)taps=[];taps.push(now);b.classList.add('live');const n=taps.length;
+  if(n<NEED){b.textContent=`${n} / ${NEED}`;return;}
+  const cad=(n-1)/((taps[n-1]-taps[0])/60000),st=cfg.speed*1000/60/cad*100;taps=[];b.classList.remove('live');b.textContent='もう一度測る';
+  if(cfg.speed<=0||st<20||st>250){$('calRes').textContent='うまく測れませんでした。速度設定を確認してもう一度。';return;}
+  const key=cfg.speed>=RUN_SPEED?'strideR':'strideW';cfg[key]=Math.round(st);save();fillSet();render();
+  $('calRes').textContent=`ピッチ ${Math.round(cad)} 歩/分 → 歩幅 ${Math.round(st)} cm を保存しました`;});
+
+// ================= TABS =================
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.toggle('on',x===b));
+  ['live','cam','run','hist','set'].forEach(v=>$('v-'+v).classList.toggle('hidden',v!==b.dataset.v));
+  if(b.dataset.v==='hist')renderHist(); if(b.dataset.v==='set')fillSet(); if(b.dataset.v==='live')renderLive();
+});
+renderCtrl();renderHist();fillSet();renderLive();
+})();
+</script>
+</body>
+</html>
