@@ -82,6 +82,7 @@ h1 span{color:var(--acc)}
 .flash{animation:fl .25s}
 @keyframes fl{0%{color:var(--acc)}100%{color:var(--text)}}
 a{color:var(--acc2)}
+.askc{color:var(--acc2)!important;border-color:#1f3b47!important}
 </style>
 </head>
 <body>
@@ -121,6 +122,7 @@ a{color:var(--acc2)}
         <button class="go" id="lvGo">スタート</button>
         <button class="end" id="lvEnd" disabled>終了</button>
       </div>
+      <button class="btn2 askc" id="lvAsk" style="width:100%;margin-top:8px;height:46px">🤖 Claudeに聞く</button>
     </div>
     <div class="card">
       <div class="row" style="padding-top:0"><label>速度<span class="hint">マシン表示に合わせると判定と距離が正確に</span></label>
@@ -166,6 +168,7 @@ a{color:var(--acc2)}
         <button data-m="0.5">÷2</button><button data-m="1" class="on">そのまま</button><button data-m="2">×2</button>
       </div>
       <div class="main" style="margin-bottom:0"><button id="vSave" class="go">記録に保存</button></div>
+      <button class="btn2 askc" id="vAsk" style="width:100%;height:46px">🤖 Claudeに振り返ってもらう</button>
     </div>
   </section>
 
@@ -214,7 +217,7 @@ a{color:var(--acc2)}
   <!-- HISTORY -->
   <section id="v-hist" class="hidden">
     <div class="card">
-      <div class="title"><span>今日</span></div>
+      <div class="title"><span>今日</span><button class="btn2 askc" id="dayAsk" style="padding:5px 10px;font-size:12px">🤖 今日のまとめを聞く</button></div>
       <div class="today">
         <div><b class="mono" id="tSteps">0</b><span class="lbl">歩</span></div>
         <div><b class="mono" id="tDist">0.00</b><span class="lbl">km</span></div>
@@ -393,6 +396,31 @@ function syncSpeedInputs(){document.querySelectorAll('.speedIn').forEach(i=>{if(
 document.querySelectorAll('.speedIn').forEach(i=>i.addEventListener('change',()=>{const v=parseFloat(i.value);
   if(isFinite(v)&&v>=0){cfg.speed=Math.round(v*10)/10;save();syncSpeedInputs();renderCtrl();if(live.eng)live.eng.expCad=expCad();if(vLast)showRes();}}));
 
+// ================= CLAUDE COACH =================
+const COACH='https://claude.ai/artifact/8NXwxzMexKGnjdUDza1LvR';
+function openLink(u){const a=document.createElement('a');a.href=u;a.target='_blank';a.rel='noopener';document.body.appendChild(a);a.click();a.remove();}
+function dayStart(off){const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-off);return d.getTime();}
+function todaySteps(extra){return hist.filter(x=>x.t>=dayStart(0)).reduce((a,x)=>a+x.st,0)+(extra||0);}
+function perMinute(series){
+  const w=series.filter(p=>p.cad>0); if(!w.length) return [];
+  const t0=series[0].t, bins={};
+  for(const p of w){const b=Math.floor((p.t-t0)/60);(bins[b]=bins[b]||[]).push(p.cad);}
+  return Object.keys(bins).map(Number).sort((a,b)=>a-b).map(b=>Math.round(bins[b].reduce((a,c)=>a+c,0)/bins[b].length)).slice(-15);
+}
+function coachUrl(mode,o){
+  o=o||{}; const P=['ts',mode];
+  if(o.steps!=null) P.push('s'+Math.floor(o.steps),'a'+Math.round(o.sec||0));
+  if(o.cad) P.push('c'+Math.round(o.cad));
+  (o.k||[]).forEach(v=>P.push('k'+v));
+  if(cfg.speed>0) P.push('v'+Math.round(cfg.speed*10),'i'+Math.round((cfg.incline||0)*10));
+  P.push('t'+Math.floor(todaySteps(o.unsaved||0)));
+  if(cfg.goal) P.push('g'+Math.round(cfg.goal));
+  if(cfg.height) P.push('h'+Math.round(cfg.height)); if(cfg.weight) P.push('w'+Math.round(cfg.weight));
+  for(let i=7;i>=1;i--){const a=dayStart(i),b=dayStart(i-1);P.push('d'+hist.filter(x=>x.t>=a&&x.t<b).reduce((s,x)=>s+x.st,0));}
+  return COACH+'#'+P.join('-');
+}
+function offerCoach(mode,o){ask('Claudeに振り返ってもらいますか？','Claudeのコーチ画面が開き、今回の記録をもとにアドバイスします。',()=>openLink(coachUrl(mode,o)));}
+
 // ================= LIVE =================
 const G_R=Bob.R, G_C=Bob.C;
 const gcv=document.createElement('canvas'); gcv.width=G_C; gcv.height=G_R;
@@ -445,6 +473,7 @@ function renderLive(){
   else if(e&&e.walking){p.textContent='● 歩行を検出中';p.classList.add('on');}
   else {p.textContent='待機中（動きを探しています）';p.classList.remove('on');}
   drawWave(e?e.trace:[]);
+  $('lvAsk').textContent=live.running?'🤖 いまのアドバイスを聞く':(live.eng?'🤖 休憩中のアドバイスを聞く':'🤖 Claudeに聞く');
 }
 function drawWave(tr){
   const c=$('lvWave'),dpr=window.devicePixelRatio||1,W=c.clientWidth,H=56;
@@ -464,20 +493,28 @@ $('lvGo').onclick=async()=>{
       if(err&&err.name==='NotAllowedError'&&!/claude\.ai|claudeusercontent/.test(location.host+document.referrer)) $('noCamMsg').textContent='カメラの使用が許可されませんでした。ブラウザの設定でこのサイトのカメラを許可してから再度お試しください。';
       return;
     }
-    if(live.eng){ const e=live.eng; live.base.steps+=e.steps; live.base.sec+=e.activeSec; }
+    if(live.eng){ const e=live.eng; live.base.steps+=e.steps; live.base.sec+=e.activeSec; live.series=(live.series||[]).concat(e.series); }
     live.eng=newEngine(); live.running=true; liveLoop(); wakeOn();
     $('lvGo').textContent='一時停止'; $('lvGo').classList.add('pause'); $('lvEnd').disabled=false;
   } else {
     live.running=false; $('lvGo').textContent='再開'; $('lvGo').classList.remove('pause'); renderLive();
   }
 };
+function liveSeries(){return (live.series||[]).concat(live.eng?live.eng.series:[]);}
+$('lvAsk').onclick=()=>{
+  const tot=liveTotal(), e=live.eng;
+  const mode=!live.eng&&!tot.steps?'day':(live.running?'now':'rest');
+  openLink(coachUrl(mode,{steps:tot.steps,sec:tot.sec,cad:e&&e.walking?e.cadence:0,k:perMinute(liveSeries()),unsaved:tot.steps}));
+};
 $('lvEnd').onclick=()=>{
   const tot=liveTotal();
   ask('終了しますか？',`${Math.floor(tot.steps).toLocaleString()}歩・${fmtT(tot.sec)}<br>記録として保存します。`,()=>{
     live.running=false; live.loopId++; wakeOff();
+    const k=perMinute(liveSeries());
     if(tot.steps>=1){const d=derive(tot.steps,tot.sec,tot.sec?tot.steps/tot.sec*60:0);
-      addHist({t:Date.now()-tot.sec*1000,sec:Math.round(tot.sec),m:Math.round(d.km*1000),st:Math.floor(tot.steps),k:Math.round(d.kcal),src:'live'});}
-    live.eng=null; live.base={steps:0,sec:0}; live.lastShown=-1; stopCam();
+      addHist({t:Date.now()-tot.sec*1000,sec:Math.round(tot.sec),m:Math.round(d.km*1000),st:Math.floor(tot.steps),k:Math.round(d.kcal),src:'live'});
+      offerCoach('end',{steps:tot.steps,sec:tot.sec,cad:tot.sec?tot.steps/tot.sec*60:0,k});}
+    live.eng=null; live.series=[]; live.base={steps:0,sec:0}; live.lastShown=-1; stopCam();
     $('lvGo').textContent='スタート'; $('lvGo').classList.remove('pause'); $('lvEnd').disabled=true; renderLive();
   });
 };
@@ -552,6 +589,7 @@ function drawChart(s,dur){
 }
 $('vMult').onclick=e=>{const b=e.target.closest('button');if(!b||!vLast)return;vMult=+b.dataset.m;
   document.querySelectorAll('#vMult button').forEach(x=>x.classList.toggle('on',x===b));showRes();};
+$('vAsk').onclick=()=>{if(!vLast)return;openLink(coachUrl('vid',{steps:vLast.final,sec:vLast.sec,cad:vLast.sec?vLast.final/vLast.sec*60:0,k:perMinute(vLast.series.map(p=>({t:p.t,cad:p.cad*vMult}))),unsaved:$('vSave').disabled?0:vLast.final}));};
 $('vSave').onclick=()=>{if(!vLast||!vLast.final)return;
   addHist({t:vLast.start,sec:Math.round(vLast.sec),m:Math.round(vLast.km*1000),st:vLast.final,k:Math.round(vLast.kcal),src:'vid'});
   $('vSave').disabled=true;$('vSave').textContent='保存済み';};
@@ -577,7 +615,8 @@ $('startBtn').onclick=()=>{if(!running){if(!s)s={start:Date.now(),sec:0,meters:0
   else{tick();running=false;clearInterval(timer);$('startBtn').textContent='再開';$('startBtn').classList.remove('pause');}render();};
 $('endBtn').onclick=()=>{if(running)tick();const sum=s?`${Math.floor(s.steps).toLocaleString()}歩・${(s.meters/1000).toFixed(2)}km・${fmtT(s.sec)}`:'';
   ask('終了しますか？',sum+'<br>記録として保存します。',()=>{running=false;clearInterval(timer);
-    if(s&&s.steps>=1)addHist({t:s.start,sec:Math.round(s.sec),m:Math.round(s.meters),st:Math.floor(s.steps),k:Math.round(s.kcal)});
+    if(s&&s.steps>=1){addHist({t:s.start,sec:Math.round(s.sec),m:Math.round(s.meters),st:Math.floor(s.steps),k:Math.round(s.kcal)});
+      offerCoach('end',{steps:s.steps,sec:s.sec,cad:expCad()});}
     s=null;$('startBtn').textContent='スタート';$('startBtn').classList.remove('pause');$('endBtn').disabled=true;render();});};
 
 // ================= HISTORY =================
@@ -592,6 +631,7 @@ function renderHist(){
     <div class="s mono">${h.st.toLocaleString()}<span class="lbl"> 歩${SRC[h.src]||''}</span></div></div>
     <div class="m mono">${fmtT(h.sec)}<br>${(h.m/1000).toFixed(2)} km<br>${h.k} kcal</div></div>`}).join(''):'<div class="note">まだ記録がありません</div>';
 }
+$('dayAsk').onclick=()=>openLink(coachUrl('day'));
 $('clearBtn').onclick=()=>ask('履歴をすべて削除しますか？','この操作は元に戻せません。',()=>{hist=[];store.set('hist',hist);renderHist()});
 
 // ================= SETTINGS =================
