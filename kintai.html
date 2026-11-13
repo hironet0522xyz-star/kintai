@@ -612,7 +612,7 @@ function save(action, sys) {
  *  - 機能を変えたら APP_VERSION を上げる（更新の記録が監査ログに1行残る）。
  *  - 監査ログ（kintai.audit）の形式を変えるときも消さずに追記で移行する。長さが減るとClaudeが巻き戻しと判定する。
  */
-const APP_VERSION = "2026.10.08-study1";
+const APP_VERSION = "2026.11.13-classbtn";
 const GOAL_VERIFIED_FROM = "2026-10-12";
 const AUTO_TASK_FROM = "2026-10-08";
 const WAKE_FROM = "2026-10-09";             // この日から起床チェックを始める（それより前には遡らない）
@@ -892,9 +892,12 @@ function renderTodo(ps) {
       if (l) { done.push(`${name}：${ST[l.status][0]}`); continue; }
       const p = s.period, a = `data-period="${p}" data-subject="${s.subjectId}"`;
       if (now < s.start - 15*60000) { items.push({ lv:"", t:`${name}`, s:`${hm(s.start)} 開始` }); continue; }
-      if (now < s.start + D.cfg.grace*60000) items.push({ lv:"info", t:`${name} の出席を打刻`, s:`${hm(s.start)} 開始。学校の中で押してください`, acts:`<button class="btn sm primary" data-act="slot" data-st="present" ${a} ${busy ? "disabled" : ""}>出席を打刻</button>` });
-      else items.push({ lv: now > s.end ? "crit" : "warn", t:`${name} がまだ記録されていません`, s: penTxt("miss", "今日中に記録しないと"),
-        acts:`${now < s.end ? `<button class="btn sm primary" data-act="slot" data-st="late" ${a} ${busy ? "disabled" : ""}>遅刻で打刻</button>` : ""}<button class="btn sm" data-act="slot" data-st="absent" ${a}>欠席</button><button class="btn sm" data-act="slot" data-st="official" ${a}>公欠</button><button class="btn sm" data-act="slot" data-st="cancel" ${a}>休講</button>` });
+      /* ボタン方式：通知を待たず、授業の15分前からその日のうちはいつでも押せる（出席・遅刻は学校の中で）。押したら変更できない */
+      const ok = now < s.start + D.cfg.grace*60000, bt = (st, lab, cls) => { const k = `slot:${p}:${st}`, on = armed === k;
+        return `<button class="btn sm ${on ? "danger armed" : cls}" data-act="slot" data-st="${st}" ${a} ${busy ? "disabled" : ""}>${on ? `${lab}で確定` : lab}</button>`; };
+      items.push({ lv: ok ? "info" : now > s.end ? "crit" : "warn", t: ok ? `${name} の出席を打刻` : `${name} がまだ記録されていません`,
+        s: `${hm(s.start)}〜${hm(s.end)}。${ok ? "学校の中で押してください" : `後からでも学校の中なら出席で記録できます。${penTxt("miss", "今日中に記録しないと")}`}。押した後は変更できません`,
+        acts: bt("present", "出席", "primary") + bt("late", "遅刻", "") + bt("absent", "欠席", "") + bt("official", "公欠", "") + bt("cancel", "休講", "") });
     }
     const wd = new Date().getDay();
     if (D.cfg.roboDays.includes(wd) && !D.sessions.some(s => ymd(new Date(s.start)) === d)) {
@@ -1020,7 +1023,7 @@ function renderClass() {
   if (!$("cDate").dataset.touched) $("cDate").value = today();   // 開きっぱなしで日付が変わっても今日になるように
   $("cDateWrap").hidden = onsite;
   $("cHoursWrap").hidden = !(st === "absent" || st === "official");
-  $("cSubmit").textContent = busy === "class" ? "位置を確認中…" : busy === "photo" ? "撮影中…" : onsite ? (D.cfg.photo ? "写真＋GPSで記録" : "位置を確認して記録") : "記録する";
+  $("cSubmit").textContent = busy === "class" ? "位置を確認中…" : busy === "photo" ? "撮影中…" : armed === "class-form" ? "確定（変更できません）" : onsite ? (D.cfg.photo ? "写真＋GPSで記録" : "位置を確認して記録") : "記録する";
   $("cSubmit").disabled = !!busy;
   $("classHint").textContent = onsite ? `出席・遅刻・早退は、${D.places.school.name}の中にいるときに今の時刻で記録します。${D.cfg.photo ? "その場で写真を1枚撮る必要があります。" : ""}` : st === "cancel" ? "休講は欠課にも罰にもなりません。" : "欠席・公欠は位置確認なしで、日付を選んで記録できます。";
   const c = D.cfg;
@@ -1040,7 +1043,7 @@ function renderClass() {
     const badge = ONSITE.includes(l.status) ? (l.geo ? `<span class="pill ok" title="${geoText(l.geo)}">位置確認済み</span>` : `<span class="pill off">手動</span>`) : "";
     return `<div class="row"><span class="date">${mdStr(l.date)}</span>
       <div class="main">${thumb(l.photo, "授業", l.photoPurged)}${l.period ? `<span class="mono small muted">${l.period}限</span>` : ""}<b>${esc(subjName(l.subjectId))}</b><span class="pill ${cls}">${lab}</span>${l.ts && ONSITE.includes(l.status) ? `<span class="mono small muted">${hm(l.ts)}</span>` : ""}${l.status === "absent" || l.status === "official" ? `<span class="mono small">${l.hours}時間</span>` : ""}${badge}</div>
-      <div>${delBtn("l:" + l.id, "log-del", l.id)}</div>
+      <div><span class="muted small" title="記録した後は変更できません">🔒</span></div>
       ${l.note ? `<div class="note">${esc(l.note)}</div>` : ""}</div>`;
   }).join("") : `<p class="empty">まだ記録がありません</p>`;
 }
@@ -1613,7 +1616,7 @@ async function recordClass({ subjectId, status, period, date, hours, note }, msg
     if (sl.length === 1) rec.period = sl[0].period;
     else if (sl.length > 1) return fail(`この日の${subjName(subjectId)}は${sl.map(x => x.period + "限").join("と")}にあります。時限を選んでください`);
   }
-  if (D.logs.some(l => sameSlot(l, rec))) return fail("この授業はもう記録済みです。間違えたときは履歴から消してから記録してください");
+  if (D.logs.some(l => sameSlot(l, rec))) return fail("この授業はもう記録済みです（記録した後は変更できません）");
   if ((status === "cancel" || status === "official") && rec.date < today()) {
     schedule(`${mdStr(rec.date)} ${rec.period ? rec.period + "限 " : ""}${subjName(subjectId)}を後から${ST[status][0]}にする`, "addLog", rec);
     msgEl.hidden = false; msgEl.className = "gpsmsg"; msgEl.textContent = "過去の日の休講・公欠は、記録漏れの帳消しを防ぐため24時間後に反映されます";
@@ -1676,7 +1679,12 @@ document.addEventListener("click", e => {
   if (a === "photo") { const src = b.getAttribute("src"); if (src) { $("lbImg").src = src; $("lightbox").hidden = false; } return; }
   if (a === "lb-close") { $("lightbox").hidden = true; $("lbImg").removeAttribute("src"); return; }
   if (a === "cancel-out") { pendingOut = null; render(); return; }
-  if (a === "slot") { if (!busy) recordClass({ subjectId: b.dataset.subject, status: b.dataset.st, period: b.dataset.period, hours: 2 }, $("todoMsg"), "slot"); return; }
+  if (a === "slot") {
+    if (busy) return;
+    const k = `slot:${b.dataset.period}:${b.dataset.st}`;
+    if (armed !== k) return arm(k);   // 押した後は変更できないので2回押しで確定
+    armed = null; recordClass({ subjectId: b.dataset.subject, status: b.dataset.st, period: b.dataset.period, hours: 2 }, $("todoMsg"), "slot"); return;
+  }
   if (a === "offday") {
     const d = today();
     if (isOff(d)) { D.offDays = D.offDays.filter(x => x !== d); save("休みの日を取り消し"); render(); toast("休みを取り消しました"); return; }
@@ -1690,7 +1698,7 @@ document.addEventListener("click", e => {
   if (a === "sess-edit") { const s = D.sessions.find(x => x.id === id); if (!s) return; editing = id; draft = { start: toLocalInput(s.start), end: s.end ? toLocalInput(s.end) : "", note: s.note || "" }; armed = null; renderSessions(); return; }
   if (a === "sess-cancel") { editing = null; draft = null; renderSessions(); fillPhotos(); return; }
   if (a === "sess-del") { if (armed !== "s:" + id) return arm("s:" + id); armed = null; editing = null; const s0 = D.sessions.find(s => s.id === id); if (!s0) return; const pen = deletionFlag(s0.created || s0.start, `入退室 ${md(s0.start)} ${hm(s0.start)}`); dropPhotos(s0.inPhoto, s0.outPhoto); D.sessions = D.sessions.filter(s => s.id !== id); save("入退室の記録を削除"); render(); toast(pen ? `削除しました（登録から10分以上たっているので +${ptsAt(today(), "delete")}点）` : "削除しました"); return; }
-  if (a === "log-del") { if (armed !== "l:" + id) return arm("l:" + id); armed = null; const l0 = D.logs.find(l => l.id === id); if (!l0) return; const pen = deletionFlag(l0.ts, `授業 ${l0.date} ${subjName(l0.subjectId)} ${ST[l0.status][0]}`); dropPhotos(l0.photo); D.logs = D.logs.filter(l => l.id !== id); save("授業の記録を削除"); render(); toast(pen ? `削除しました（登録から10分以上たっているので +${ptsAt(today(), "delete")}点）` : "削除しました"); return; }
+  if (a === "log-del") return toast("授業の記録は変更・削除できません");
   if (a === "sub-del") { if (armed !== "u:" + id) return arm("u:" + id); armed = null; return schedule(`科目「${subjName(id)}」を削除`, "subDel", { id }); }
   if (a === "pay") { if (armed !== "pay:" + id) return arm("pay:" + id); armed = null; const m = D.penalty.menu.find(x => x.id === id); if (!m) return; const bal = penaltyState().bal;
     if (bal <= 0) return toast("罰ポイントがないので、清算するものはありません（前払いはできません）");
@@ -1807,6 +1815,8 @@ document.addEventListener("submit", e => {
   if (f.id === "classForm") {
     const subjectId = $("cSubj").value; if (!subjectId) return toast("先に設定タブで科目を登録してください");
     if (busy) return;
+    if (armed !== "class-form") { arm("class-form"); return toast("記録した後は変更できません。内容を確かめて、もう一度押すと確定します"); }
+    armed = null;
     recordClass({ subjectId, status: curStatus(), period: $("cPeriod").value, date: $("cDate").value, hours: $("cHours").value, note: $("cNote").value.trim() }, $("classMsg"), "class")
       .then(ok => { if (ok) $("cNote").value = ""; });
     return;
