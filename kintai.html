@@ -426,15 +426,10 @@ table.tt input[type=time]{min-height:34px;padding:2px 4px;font-size:.8rem;width:
         <button class="btn" type="submit">保存</button>
       </form>
       <p class="muted small">誤差がこれより大きいときは打刻できません。校舎の中で通りにくい場合は 100〜150 にしてください。</p>
-      <details class="small" style="margin-top:8px"><summary><b>二度寝の感知（iPhoneのショートカット）</b></summary>
-        <p class="muted">アラームを止めた時刻をこのアプリに記録し、止めてから10分以内に起床チェックがなければ「二度寝」（罰ポイント）にします。</p>
-        <ol class="muted" style="padding-left:1.2em;margin:4px 0">
-          <li>「ショートカット」アプリ →「オートメーション」→ 右上の「＋」</li>
-          <li>「アラーム」→「停止したとき」を選び、朝に使うアラームを選ぶ →「すぐに実行」→「次へ」</li>
-          <li>「新規の空のオートメーション」→「アクションを追加」→「URLを開く」</li>
-          <li>URLに下の文字を貼り付けて「完了」</li>
-        </ol>
-        <div class="btnrow"><code id="alarmUrl" style="word-break:break-all">https://hironet0522xyz-star.github.io/kintai/kintai.html#alarm</code><button class="btn sm" type="button" data-act="copy-alarm">URLをコピー</button></div>
+      <details class="small" style="margin-top:8px"><summary><b>二度寝の感知（ボタン方式）</b></summary>
+        <p class="muted">授業のある日の朝、アラームを止めたら打刻タブの「アラームを止めた」を押します。止めてから10分以内に起床チェックがなければ「二度寝」（罰ポイント）です。</p>
+        <p class="muted">押し忘れたときは、止めた時刻を入れて後から記録できます。一度記録した時刻は変更・削除できません。</p>
+        <p class="muted">以前の iPhone ショートカット（#alarm）は通知が遅れるため使いません。設定してある場合はオートメーションを削除してください（残っていても記録はされず、打刻タブが開くだけです）。</p>
       </details>
     </div>
     <div class="box">
@@ -612,7 +607,7 @@ function save(action, sys) {
  *  - 機能を変えたら APP_VERSION を上げる（更新の記録が監査ログに1行残る）。
  *  - 監査ログ（kintai.audit）の形式を変えるときも消さずに追記で移行する。長さが減るとClaudeが巻き戻しと判定する。
  */
-const APP_VERSION = "2026.10.08-study1";
+const APP_VERSION = "2026.11.13-alarmbtn";
 const GOAL_VERIFIED_FROM = "2026-10-12";
 const AUTO_TASK_FROM = "2026-10-08";
 const WAKE_FROM = "2026-10-09";             // この日から起床チェックを始める（それより前には遡らない）
@@ -919,6 +914,14 @@ function renderTodo(ps) {
         acts: `<input type="number" id="wakeAns" inputmode="numeric" style="width:100px" aria-label="答え" placeholder="答え" value="${esc(wakeDraft)}"><button class="btn sm primary" data-act="wake">起きた</button>` });
     }
   }
+  { const w = wakeInfo(d), lo = w ? w.wake - 4 * 3600000 : 0;
+    if (w && !w.alarm && now >= lo) {
+      const hi = Math.min(now, w.first - 60000), canNow = now < w.first, ak = "alarm-at";
+      if (hi >= lo) items.unshift({ lv: w.log ? "" : "info", t: canNow && !w.log ? "アラームを止めたら押す" : "アラームを止めた時刻を記録",
+        s: `${canNow ? "押した時刻が記録されます。" : ""}押し忘れたら、止めた時刻（${hm(lo)}〜${hm(hi)}）を入れて後から記録できます。一度記録すると変更できません`,
+        acts: `${canNow ? `<button class="btn sm primary" data-act="alarm-now">アラームを止めた</button>` : ""}<input type="time" id="alarmAt" style="width:110px" aria-label="止めた時刻" value="${esc(alarmDraft)}"><button class="btn sm ${armed === ak ? "danger armed" : ""}" data-act="alarm-at">${armed === ak ? "確定（変更できません）" : "この時刻で記録"}</button>` });
+    }
+  }
   { const s = openStudy();
     if (s) { const st = studyDue(s);
       items.unshift({ lv: st.late ? "crit" : st.soon ? "warn" : "info", t: st.late ? `勉強の報告が遅れています：${esc(studyName(s))}` : st.soon ? `勉強の成果を報告する時間です（${hm(st.due)}）` : `勉強中：${esc(studyName(s))}`,
@@ -1054,7 +1057,7 @@ function wakeInfo(d) {
   const alarm = (D.alarms || []).find(a => a.date === d && a.ts >= wake - 4 * 3600000 && a.ts < first) || null;
   return { first, wake, open: Math.min(wake - 120 * 60000, alarm ? alarm.ts : Infinity), close: wake + (+D.cfg.wakeGrace || 30) * 60000, alarm, log: (D.wakes || []).find(w => w.date === d) };
 }
-let wakeQ = null, wakeDraft = "";
+let wakeQ = null, wakeDraft = "", alarmDraft = "";
 function newWakeQ() { const a = 12 + Math.floor(Math.random() * 70), b = 7 + Math.floor(Math.random() * 25); wakeQ = { a, b }; return wakeQ; }
 /* ---------- 授業後の課題の自動登録 ----------
  * 授業が終わったら「科目の課題」を締切 autoTaskDays 日後 23:59 で登録する（同じ日の同じ科目は1件）。
@@ -1698,7 +1701,18 @@ document.addEventListener("click", e => {
   if (a === "menu-del") { if (armed !== "menu:" + id) return arm("menu:" + id); armed = null; D.penalty.menu = D.penalty.menu.filter(m => m.id !== id); save(); render(); return; }
   if (a === "preset") return applyPreset(false);
   if (a === "task-done") return submitTask(id);
-  if (a === "copy-alarm") { const u = location.origin + location.pathname + "#alarm"; try { navigator.clipboard.writeText(u).then(() => toast("URLをコピーしました。ショートカットに貼り付けてください"), () => toast(u)); } catch { toast(u); } return; }
+  if (a === "alarm-now") return addAlarm(Date.now());
+  if (a === "alarm-at") {
+    const v = (($("alarmAt") || {}).value || alarmDraft || "").trim();
+    if (!/^\d{1,2}:\d{2}$/.test(v)) return toast("止めた時刻を入れてください");
+    const ts = at(today(), v), w = wakeInfo(today());
+    if (!w) return;
+    const lo = w.wake - 4 * 3600000, hi = Math.min(Date.now(), w.first - 60000);
+    if (ts < lo || ts > hi) return toast(`${hm(lo)}〜${hm(hi)} の時刻を入れてください`);
+    alarmDraft = v;
+    if (armed !== "alarm-at") return arm("alarm-at");
+    armed = null; return addAlarm(ts, true);
+  }
   if (a === "study-shot") return studyShot(false);
   if (a === "study-end") return studyShot(true);
   if (a === "study-end0") { if (armed !== "study-end0") return arm("study-end0"); armed = null; return studyEndNoPhoto(); }
@@ -1754,6 +1768,7 @@ document.addEventListener("input", e => {
   if (id === "punchNote") punchDraft = t.value;
   if (id === "teTitle" || id === "teDue" || id === "teNote") taskDraft[id] = t.value;
   if (id === "wakeAns") wakeDraft = t.value;
+  if (id === "alarmAt") alarmDraft = t.value;
   if (["rDen","rLate","rOff"].includes(id)) dirty.rule = true;
   if (id === "gAcc" || id === "gPhoto" || id === "gProof" || id === "gAuto" || id === "gWake") dirty.acc = true;
   if (id === "kKeep") dirty.keep = true;
@@ -2215,18 +2230,25 @@ applyDuePending();
 checkClock();
 autoTasks();
 closeStaleStudy();
-/* iPhoneのショートカット「アラームを停止したとき → URLを開く(#alarm)」から呼ばれる。止めた時刻を残し、10分以内の起床チェックを求める */
-function recordAlarm() {
-  try { history.replaceState(null, "", location.pathname + location.search); } catch {}   // 次のアラームでも hashchange が起きるように消す
+/* アラームを止めたら打刻タブの「アラームを止めた」ボタンで記録する（ショートカットの通知は遅れることが多いのでボタン方式）。
+ * 押し忘れたときは止めた時刻を入れて後から記録できる。一度記録したら変更・削除はできない。止めてから10分以内の起床チェックを求める */
+function addAlarm(ts, late) {
   const d = today(), now = Date.now(), w = wakeInfo(d);
-  setTab("punch");
   if (!w) return toast("今日は起床チェックのない日です（アラームの記録はしません）");
-  if (now >= w.first) return toast("最初の授業が始まっているので、アラームは記録しません");
-  if (w.alarm || now < w.wake - 4 * 3600000) { render(); return setTimeout(() => { const el = $("wakeAns"); if (el) el.focus(); }, 300); }
-  D.alarms.push({ date: d, ts: now }); if (D.alarms.length > 120) D.alarms.splice(0, D.alarms.length - 120);
-  save(`アラーム停止 ${hm(now)}`); render();
-  toast(w.log ? "アラームを記録しました（起床チェックは済んでいます）" : `アラームを記録しました。${hm(now + ALARM_GAP)}までに起床チェックをしてください`);
+  if (w.alarm) return toast(`アラームは ${hm(w.alarm.ts)} で記録済みです（変更できません）`);
+  if (ts < w.wake - 4 * 3600000 || ts >= w.first || ts > now) return toast("この時刻は記録できません");
+  D.alarms.push({ date: d, ts, rec: now, late: !!late }); if (D.alarms.length > 120) D.alarms.splice(0, D.alarms.length - 120);
+  alarmDraft = "";
+  save(`アラーム停止 ${hm(ts)}${late ? `（${hm(now)}に後から記録）` : ""}`); render();
+  const due = ts + ALARM_GAP;
+  toast(w.log ? (w.log.ts > due ? `記録しました。起床チェックが${hm(due)}より後なので二度寝になります` : "記録しました（起床チェックは済んでいます）")
+    : now > due ? `記録しました。${hm(due)}を過ぎているので二度寝です。今すぐ起床チェックを` : `記録しました。${hm(due)}までに起床チェックをしてください`);
   setTimeout(() => { const el = $("wakeAns"); if (el) el.focus(); }, 300);
+}
+/* 以前のショートカット（#alarm）から開いたときは、記録せずにボタンのある打刻タブを開くだけ */
+function recordAlarm() {
+  try { history.replaceState(null, "", location.pathname + location.search); } catch {}
+  setTab("punch"); render();
 }
 const openFromLink = () => { if ((location.hash || "").slice(1) === "alarm") return recordAlarm(); if ((location.hash || "").slice(1) === "wake") { setTab("punch"); setTimeout(() => { const el = $("wakeAns"); if (el) el.focus(); }, 300); return; } if ((location.hash || "").slice(1) === "kadai") { setTab("task"); sheetSkipped.clear(); maybeShowTaskSheet(true); } };
 window.addEventListener("hashchange", openFromLink);
